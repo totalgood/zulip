@@ -11,45 +11,44 @@ class zulip_ops::apache {
   }
 
   file { "/etc/apache2/users/":
-    require => Package['apache2'],
     ensure   => directory,
+    require => Package['apache2'],
     owner    => "www-data",
     group    => "www-data",
-    mode     => 600,
+    mode     => '0600',
   }
 
   file { "/etc/apache2/users/wiki":
-    require => File["/etc/apache2/users/"],
     ensure => file,
+    require => File["/etc/apache2/users/"],
     owner  => "www-data",
     group  => "www-data",
-    mode => 600,
+    mode => '0600',
     source => "puppet:///modules/zulip_ops/apache/users",
   }
 
   file { "/etc/apache2/certs/":
-    require => Package['apache2'],
     ensure => directory,
+    require => Package['apache2'],
     owner => "root",
     group => "root",
-    mode => 644,
+    mode => '0644',
   }
 
   file { "/etc/apache2/ports.conf":
-    require => Package[apache2],
     ensure => file,
+    require => Package[apache2],
     owner  => "root",
     group  => "root",
-    mode => 640,
+    mode => '0640',
     source => "puppet:///modules/zulip_ops/apache/ports.conf",
   }
 
   file { "/etc/apache2/sites-available/":
-    recurse => true,
+    ensure => directory,
     require => Package[apache2],
     owner  => "root",
     group  => "root",
-    mode => 640,
-    source => "puppet:///modules/zulip_ops/apache/sites/",
+    mode => '0640',
   }
 }

@@ -26,7 +26,7 @@ function update_buttons_with_focus(focused) {
     if (focused
         || search_query.val()
         || narrow_state.active()) {
-        $('.search_button').removeAttr('disabled');
+        $('.search_button').prop('disabled', false);
     } else {
         $('.search_button').attr('disabled', 'disabled');
     }
@@ -45,7 +45,7 @@ exports.initialize = function () {
     // just represents the key of the hash, so it's redundant.)
     var search_object = {};
 
-    $( "#search_query" ).typeahead({
+    $("#search_query").typeahead({
         source: function (query) {
             var suggestions = search_suggestion.get_suggestions(query);
             // Update our global search_object hash
@@ -102,9 +102,8 @@ exports.initialize = function () {
     $('#search_exit').on('click', exports.clear_search);
 
     var query = $('#search_query');
-    query.on('focus', exports.focus_search)
-         .on('blur' , function () {
-
+    query.on('focus', exports.focus_search);
+    query.on('blur' , function () {
         // The search query box is a visual cue as to
         // whether search or narrowing is active.  If
         // the user blurs the search box, then we should

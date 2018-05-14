@@ -1,14 +1,13 @@
-add_dependencies({
-    people: 'js/people.js',
-    stream_data: 'js/stream_data.js',
-    util: 'js/util.js',
-});
+zrequire('util');
+zrequire('unread');
+zrequire('stream_data');
+zrequire('people');
+zrequire('Handlebars', 'handlebars');
+zrequire('Filter', 'js/filter');
 
+set_global('message_store', {});
 set_global('page_params', {});
 set_global('feature_flags', {});
-
-var Filter = require('js/filter.js');
-var _ = global._;
 
 var me = {
     email: 'me@example.com',
@@ -80,6 +79,7 @@ function assert_same_operators(result, terms) {
 
     assert(filter.is_search());
     assert(! filter.can_apply_locally());
+    assert(! filter.is_exactly('stream'));
 
     // If our only stream operator is negated, then for all intents and purposes,
     // we don't consider ourselves to have a stream operator, because we don't
@@ -135,6 +135,7 @@ function assert_same_operators(result, terms) {
     var filter = new Filter(operators);
 
     assert.deepEqual(filter.operands('stream'), ['foo']);
+    assert(filter.is_exactly('stream'));
 }());
 
 (function test_public_operators() {
@@ -146,6 +147,7 @@ function assert_same_operators(result, terms) {
 
     var filter = new Filter(operators);
     assert_same_operators(filter.public_operators(), operators);
+    assert(!filter.is_exactly('stream'));
 
     global.page_params.narrow_stream = 'default';
     operators = [
@@ -256,6 +258,10 @@ function make_sub(name, stream_id) {
     assert(predicate({starred: true}));
     assert(!predicate({starred: false}));
 
+    predicate = get_predicate([['is', 'unread']]);
+    assert(predicate({unread: true}));
+    assert(!predicate({unread: false}));
+
     predicate = get_predicate([['is', 'alerted']]);
     assert(predicate({alerted: true}));
     assert(!predicate({alerted: false}));
@@ -305,11 +311,45 @@ function make_sub(name, stream_id) {
     }));
     assert(!predicate({type: 'stream'}));
 
+    predicate = get_predicate([['pm-with', 'Joe@example.com,steve@foo.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{user_id: joe.user_id}, {user_id: steve.user_id}],
+    }));
+
+    // Make sure your own email is ignored
+    predicate = get_predicate([['pm-with', 'Joe@example.com,steve@foo.com,me@example.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{user_id: joe.user_id}, {user_id: steve.user_id}],
+    }));
+
     predicate = get_predicate([['pm-with', 'nobody@example.com']]);
     assert(!predicate({
         type: 'private',
         display_recipient: [{id: joe.user_id}],
     }));
+
+    predicate = get_predicate([['group-pm-with', 'nobody@example.com']]);
+    assert(!predicate({
+        type: 'private',
+        display_recipient: [{id: joe.user_id}],
+    }));
+
+    predicate = get_predicate([['group-pm-with', 'Joe@example.com']]);
+    assert(predicate({
+        type: 'private',
+        display_recipient: [{id: joe.user_id}, {id: steve.user_id}, {id: me.user_id}],
+    }));
+    assert(!predicate({ // you must be a part of the group pm
+        type: 'private',
+        display_recipient: [{id: joe.user_id}, {id: steve.user_id}],
+    }));
+    assert(!predicate({
+        type: 'private',
+        display_recipient: [{id: steve.user_id}, {id: me.user_id}],
+    }));
+    assert(!predicate({type: 'stream'}));
 }());
 
 (function test_negated_predicates() {
@@ -383,7 +423,7 @@ function make_sub(name, stream_id) {
         {operator: 'topic', operand: 'bar'},
     ];
     var filter = new Filter(terms);
-    predicate = filter.predicate();
+    filter.predicate();
     predicate = filter.predicate(); // get cached version
     assert(predicate({type: 'stream', stream: 'foo', subject: 'bar'}));
 
@@ -421,6 +461,26 @@ function make_sub(name, stream_id) {
     string = 'stream:With+Space';
     operators = [
         {operator: 'stream', operand: 'With Space'},
+    ];
+    _test();
+
+    string = 'stream:"with quoted space" topic:and separate';
+    operators = [
+        {operator: 'stream', operand: 'with quoted space'},
+        {operator: 'topic', operand: 'and'},
+        {operator: 'search', operand: 'separate'},
+    ];
+    _test();
+
+    string = 'stream:"unclosed quote';
+    operators = [
+        {operator: 'stream', operand: 'unclosed quote'},
+    ];
+    _test();
+
+    string = 'stream:""';
+    operators = [
+        {operator: 'stream', operand: ''},
     ];
     _test();
 
@@ -464,6 +524,17 @@ function make_sub(name, stream_id) {
         {operator: 'search', operand: ':stream: -:emoji: are cool'},
     ];
     _test();
+
+    string = '';
+    operators = [];
+    _test();
+
+    string = 'stream: separated topic: "with space"';
+    operators = [
+        {operator: 'stream', operand: 'separated'},
+        {operator: 'topic', operand: 'with space'},
+    ];
+    _test();
 }());
 
 (function test_unparse() {
@@ -489,6 +560,12 @@ function make_sub(name, stream_id) {
     ];
     string = 'near:150';
     assert.deepEqual(Filter.unparse(operators), string);
+
+    operators = [
+        {operator: '', operand: ''},
+    ];
+    string = '';
+    assert.deepEqual(Filter.unparse(operators), string);
 }());
 
 (function test_describe() {
@@ -499,87 +576,267 @@ function make_sub(name, stream_id) {
         {operator: 'stream', operand: 'devel'},
         {operator: 'is', operand: 'starred'},
     ];
-    string = 'Narrow to stream devel, Narrow to starred messages';
+    string = 'stream devel, starred messages';
+    assert.equal(Filter.describe(narrow), string);
+
+    narrow = [
+        {operator: 'stream', operand: 'river'},
+        {operator: 'is', operand: 'unread'},
+    ];
+    string = 'stream river, unread messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'topic', operand: 'JS'},
     ];
-    string = 'Narrow to devel > JS';
+    string = 'stream devel &gt; JS';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'private'},
         {operator: 'search', operand: 'lunch'},
     ];
-    string = 'Narrow to all private messages, Search for lunch';
+    string = 'private messages, search for lunch';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'id', operand: 99},
     ];
-    string = 'Narrow to message ID 99';
+    string = 'message ID 99';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'in', operand: 'home'},
     ];
-    string = 'Narrow to messages in home';
+    string = 'messages in home';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'mentioned'},
     ];
-    string = 'Narrow to mentioned messages';
+    string = '@-mentions';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'alerted'},
     ];
-    string = 'Narrow to alerted messages';
+    string = 'alerted messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'something_we_do_not_support'},
     ];
-    string = 'Narrow to (unknown operator)';
+    string = 'something_we_do_not_support messages';
     assert.equal(Filter.describe(narrow), string);
 
+    // this should be unreachable, but just in case
     narrow = [
         {operator: 'bogus', operand: 'foo'},
     ];
-    string = 'Narrow to (unknown operator)';
+    string = 'unknown operator';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'topic', operand: 'JS', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude topic JS';
+    string = 'stream devel, exclude topic JS';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'is', operand: 'private'},
         {operator: 'search', operand: 'lunch', negated: true},
     ];
-    string = 'Narrow to all private messages, Exclude lunch';
+    string = 'private messages, exclude lunch';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'is', operand: 'starred', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude starred messages';
+    string = 'stream devel, exclude starred messages';
     assert.equal(Filter.describe(narrow), string);
 
     narrow = [
         {operator: 'stream', operand: 'devel'},
         {operator: 'has', operand: 'image', negated: true},
     ];
-    string = 'Narrow to stream devel, Exclude messages with one or more image';
+    string = 'stream devel, exclude messages with one or more image';
     assert.equal(Filter.describe(narrow), string);
 
+    narrow = [];
+    string = 'all messages';
+    assert.equal(Filter.describe(narrow), string);
+}());
+
+(function test_is_functions() {
+    var terms = [
+        {operator: 'stream', operand: 'My Stream'},
+    ];
+    var filter = new Filter(terms);
+    assert.equal(filter.is_exactly('stream'), true);
+    assert.equal(filter.is_exactly('stream', 'topic'), false);
+    assert.equal(filter.is_exactly('pm-with'), false);
+
+    terms = [
+        // try a non-orthodox ordering
+        {operator: 'topic', operand: 'My Topic'},
+        {operator: 'stream', operand: 'My Stream'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.can_bucket_by('stream'), true);
+    assert.equal(filter.can_bucket_by('stream', 'topic'), true);
+    assert.equal(filter.is_exactly('stream'), false);
+    assert.equal(filter.is_exactly('stream', 'topic'), true);
+    assert.equal(filter.is_exactly('pm-with'), false);
+    assert.equal(filter.can_bucket_by('pm-with'), false);
+
+    terms = [
+        {operator: 'stream', operand: 'My Stream', negated: true},
+        {operator: 'topic', operand: 'My Topic'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.can_bucket_by('stream'), false);
+    assert.equal(filter.can_bucket_by('stream', 'topic'), false);
+    assert.equal(filter.is_exactly('stream'), false);
+    assert.equal(filter.is_exactly('stream', 'topic'), false);
+    assert.equal(filter.is_exactly('pm-with'), false);
+
+    terms = [
+        {operator: 'pm-with', operand: 'foo@example.com', negated: true},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('stream'), false);
+    assert.equal(filter.is_exactly('stream', 'topic'), false);
+    assert.equal(filter.is_exactly('pm-with'), false);
+
+    terms = [
+        {operator: 'pm-with', operand: 'foo@example.com,bar@example.com'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('stream'), false);
+    assert.equal(filter.is_exactly('stream', 'topic'), false);
+    assert.equal(filter.is_exactly('pm-with'), true);
+    assert.equal(filter.is_exactly('is-mentioned'), false);
+    assert.equal(filter.is_exactly('is-private'), false);
+
+    terms = [
+        {operator: 'is', operand: 'private'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('is-mentioned'), false);
+    assert.equal(filter.is_exactly('is-private'), true);
+
+    terms = [
+        {operator: 'is', operand: 'mentioned'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('is-mentioned'), true);
+    assert.equal(filter.is_exactly('is-private'), false);
+
+    terms = [
+        {operator: 'is', operand: 'mentioned'},
+        {operator: 'is', operand: 'starred'},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('is-mentioned'), false);
+    assert.equal(filter.is_exactly('is-private'), false);
+    assert.equal(filter.can_bucket_by('is-mentioned'), true);
+    assert.equal(filter.can_bucket_by('is-private'), false);
+
+    // The call below returns false for somewhat arbitrary
+    // reasons -- we say is-private has precedence over
+    // is-starred.
+    assert.equal(filter.can_bucket_by('is-starred'), false);
+
+    terms = [
+        {operator: 'is', operand: 'mentioned', negated: true},
+    ];
+    filter = new Filter(terms);
+    assert.equal(filter.is_exactly('is-mentioned'), false);
+    assert.equal(filter.is_exactly('is-private'), false);
+}());
+
+(function test_term_type() {
+    function assert_term_type(term, expected_term_type) {
+        assert.equal(Filter.term_type(term), expected_term_type);
+    }
+
+    function term(operator, operand, negated) {
+        return {
+            operator: operator,
+            operand: operand,
+            negated: negated,
+        };
+    }
+
+    assert_term_type(term('stream', 'whatever'), 'stream');
+    assert_term_type(term('pm-with', 'whomever'), 'pm-with');
+    assert_term_type(term('pm-with', 'whomever', true), 'not-pm-with');
+    assert_term_type(term('is', 'private'), 'is-private');
+    assert_term_type(term('has', 'link'), 'has-link');
+    assert_term_type(term('has', 'attachment', true), 'not-has-attachment');
+
+    function assert_term_sort(in_terms, expected) {
+        const sorted_terms = Filter.sorted_term_types(in_terms);
+        assert.deepEqual(sorted_terms, expected);
+    }
+
+    assert_term_sort(
+        ['topic', 'stream', 'sender'],
+        ['stream', 'topic', 'sender']
+    );
+
+    assert_term_sort(
+        ['has-link', 'near', 'is-unread', 'pm-with'],
+        ['pm-with', 'near', 'is-unread', 'has-link']
+    );
+
+    assert_term_sort(
+        ['bogus', 'stream', 'topic'],
+        ['stream', 'topic', 'bogus']
+    );
+    assert_term_sort(
+        ['stream', 'topic', 'stream'],
+        ['stream', 'stream', 'topic']
+    );
+
+    const terms = [
+        {operator: 'topic', operand: 'lunch'},
+        {operator: 'sender', operand: 'steve@foo.com'},
+        {operator: 'stream', operand: 'Verona'},
+    ];
+    const filter = new Filter(terms);
+    const term_types = filter.sorted_term_types();
+
+    assert.deepEqual(term_types, ['stream', 'topic', 'sender']);
+}());
+
+(function test_first_valid_id_from() {
+    const terms = [
+        {operator: 'is', operand: 'alerted'},
+    ];
+
+    const filter = new Filter(terms);
+
+    const messages = {
+        5: { id: 5, alerted: true },
+        10: { id: 10 },
+        20: { id: 20, alerted: true },
+        30: { id: 30, type: 'stream' },
+        40: { id: 40, alerted: false },
+    };
+
+    const msg_ids = [10, 20, 30, 40];
+
+    message_store.get = () => {};
+
+    assert.equal(filter.first_valid_id_from(msg_ids), undefined);
+
+    message_store.get = (msg_id) => messages[msg_id];
+
+    assert.equal(filter.first_valid_id_from(msg_ids), 20);
 }());
 
 (function test_update_email() {

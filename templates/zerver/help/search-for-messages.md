@@ -40,7 +40,7 @@ contain "walk", "walks", "walked", etc.
 To see a list of all search operators in Zulip, click the search (<i
 class="icon-vector-search"></i>) icon on the left side of the search bar.
 You can alternatively click the cog (<i class="icon-vector-cog"></i>) icon
-in the upper right corner of the right sidebar and choose **Search help**
+in the top right corner of the right sidebar and choose **Search help**
 from the dropdown menu that appears.
 
 ![Search help](/static/images/help/search-help.png)
@@ -55,6 +55,11 @@ Listed below are all Zulip search operators.
 * `pm-with:foo@bar.com` - This operator narrows the view to show only
   private messages sent from the user with the email address
   `foo@bar.com`.
+* `group-pm-with:foo@bar.com` - This operator narrows the view to show
+  all group private messages in groups that contain both you and the
+  user with email address `foo@bar.com`. This operator does not show
+  1:1 private messages between you and the user with email address
+  `foo@bar.com`
 * `sender:foo@bar.com` - This operator narrows the view to show all
   messages sent by the user with the email address `foo@bar.com`.
 * `sender:me` - This operator narrows the view to show all messages sent by you.
@@ -72,6 +77,8 @@ you.
 that you've received.
 * `is:starred` - This operator narrows the view to show all messages that you've
 starred.
+* `is:unread` - This operator narrows the view to show all messages that you
+haven't read.
 * `has:link` - This operator narrows the view to show all messages that contain
 any links.
 * `has:image` - This operator narrows the view to show all messages that contain

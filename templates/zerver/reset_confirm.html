@@ -1,13 +1,12 @@
 {% extends "zerver/portico_signup.html" %}
 {% block customhead %}
 {{ super() }}
-{{ minified_js('zxcvbn')|safe }}
+{{ render_bundle('zxcvbn') }}
 {% endblock %}
 
 {% block portico_content %}
 
 <div class="password-container flex full-page new-style">
-    <div class="bg-image"></div>
 
     <!-- wrapper for flex content -->
     <div>
@@ -30,11 +29,10 @@
                 <div class="input-box">
                     <label for="id_new_password1" class="">{{ _('Password') }}</label>
                     <input id="id_new_password1" class="required" type="password" name="new_password1"
-                           value="{% if form.new_password1.value() %}{{ form.new_password1.value() }}{% endif %}"
-                           maxlength="100"
-                           data-min-length="{{password_min_length}}"
-                           data-min-quality="{{password_min_quality}}" required />
-                    <img class="valid" src="/static/images/checkbox-valid.svg" />
+                      value="{% if form.new_password1.value() %}{{ form.new_password1.value() }}{% endif %}"
+                      maxlength="100"
+                      data-min-length="{{password_min_length}}"
+                      data-min-guesses="{{password_min_guesses}}" required />
                     {% if form.new_password1.errors %}
                         {% for error in form.new_password1.errors %}
                         <div class="alert alert-error">{{ error }}</div>
@@ -51,9 +49,8 @@
                 <div class="input-box">
                     <label for="id_new_password2" class="">{{ _('Confirm password') }}</label>
                     <input id="id_new_password2" class="required" type="password" name="new_password2"
-                           value="{% if form.new_password2.value() %}{{ form.new_password2.value() }}{% endif %}"
-                           maxlength="100" required />
-                    <img class="valid" src="/static/images/checkbox-valid.svg" />
+                      value="{% if form.new_password2.value() %}{{ form.new_password2.value() }}{% endif %}"
+                      maxlength="100" required />
                     {% if form.new_password2.errors %}
                         {% for error in form.new_password2.errors %}
                         <div class="alert alert-error">{{ error }}</div>
@@ -69,7 +66,7 @@
             </form>
 
             <script type="text/javascript">
-                autofocus('#id_new_password1');
+                common.autofocus('#id_new_password1');
             </script>
             {% else %}
             <p>{{ _('Sorry, the link you provided is invalid or has already been used.') }}</p>

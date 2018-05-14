@@ -1,22 +1,14 @@
 # View an image at full size
 
-When someone sends an image in a message, a thumbnail preview of the image
-will be generated in the message if the image is a common image type (i.e.
-PNG, JPEG, etc.).
+When someone sends an image in a message, Zulip generates a small preview if
+the image is a common image type, like PNG, JPEG, or GIF.
 
-![preview](/static/images/help/image-preview.png)
-
-To view the image in full size, click on the thumbnail preview of the image.
-Clicking it will open a lightbox modal with varying options depending on the
-media type.
-
-![full-size](/static/images/help/full-size.png)
-
-Images can be opened in new tabs by clicking the **Open** button at the top
-right corner of the screen, but they also can be downloaded by clicking the
-**Download** button.
+To **view the image at full size**, click on the preview. From there, you
+can **pan and zoom**, **download** the image, and **navigate to other
+images** in the narrow. You can close the full screen view by clicking
+anywhere outside the image.
 
 !!! tip ""
-    To exit out of the lightbox modal, click the x (<i
-    class="icon-vector-remove"></i>) icon in the top right corner or press
-    the escape key.
+    Use `v` to **open** the full screen view. From there you
+    can use the arrow keys to navigate to other images in the narrow.
+    Use `v` or `Esc` to **close**.

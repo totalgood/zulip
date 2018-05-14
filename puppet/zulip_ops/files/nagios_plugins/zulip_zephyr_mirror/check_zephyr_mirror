@@ -1,14 +1,14 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Nagios plugin to check that Zephyr mirror forwarding is running.
 
 This script just checks the contents of a file. The forwarding test
-itself lives in api/bots/check-mirroring and should be run out of cron.
+itself lives in api/integrations/zephyr/check-mirroring and should be
+run out of cron.
 
-See bots/zephyr-mirror-crontab for the crontab details.
+See puppet/zulip_ops/files/cron.d/zephyr-mirror for the crontab details.
 """
-from __future__ import print_function
 if False:
     from typing import Dict
 
@@ -22,7 +22,7 @@ states = {
     "WARNING": 1,
     "CRITICAL": 2,
     "UNKNOWN": 3
-} # type: Dict[str, int]
+}  # type: Dict[str, int]
 
 def report(state, data, last_check):
     # type: (str, str, float) -> None

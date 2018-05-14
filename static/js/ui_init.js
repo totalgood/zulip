@@ -34,17 +34,17 @@ function message_hover(message_row) {
     message_row.addClass('message_hovered');
     current_message_hover = message_row;
 
-    if (!message.sent_by_me) {
+    if (!message_edit.is_topic_editable(message)) {
         // The actions and reactions icon hover logic is handled entirely by CSS
         return;
     }
 
-    // But the message edit hover icon is determined by whether the message is still editablex
+    // But the message edit hover icon is determined by whether the message is still editable
     if ((message_edit.get_editability(message) === message_edit.editability_types.FULL) &&
         !message.status_message) {
-        message_row.find(".edit_content").html('<i class="icon-vector-pencil edit_content_button"></i>');
+        message_row.find(".edit_content").html('<i class="fa fa-pencil edit_content_button" aria-hidden="true" title="Edit"></i>');
     } else {
-        message_row.find(".edit_content").html('<i class="icon-vector-file-text-alt edit_content_button" data-msgid="' + id + '"></i>');
+        message_row.find(".edit_content").html('<i class="fa fa-file-text-o edit_content_button" aria-hidden="true" title="View source" data-msgid="' + id + '"></i>');
     }
 }
 
@@ -54,11 +54,11 @@ $(function () {
         // scroll handler, but when we're at the top or bottom of the
         // page, the pointer may still need to move.
 
-        if (delta > 0) {
+        if (delta < 0) {
             if (message_viewport.at_top()) {
                 navigate.up();
             }
-        } else if (delta < 0) {
+        } else if (delta > 0) {
             if (message_viewport.at_bottom()) {
                 navigate.down();
             }
@@ -67,8 +67,9 @@ $(function () {
         message_viewport.last_movement_direction = delta;
     });
 
-    message_viewport.message_pane.mousewheel(function (e, delta) {
-        if (!modals.is_active()) {
+    message_viewport.message_pane.on('wheel', function (e) {
+        var delta = e.originalEvent.deltaY;
+        if (!overlays.is_active()) {
             // In the message view, we use a throttled mousewheel handler.
             throttled_mousewheelhandler(e, delta);
         }
@@ -78,28 +79,29 @@ $(function () {
 
     $(window).resize($.throttle(50, resize.handler));
 
-    // Scrolling in modals, input boxes, and other elements that
+    // Scrolling in overlays. input boxes, and other elements that
     // explicitly scroll should not scroll the main view.  Stop
     // propagation in all cases.  Also, ignore the event if the
     // element is already at the top or bottom.  Otherwise we get a
     // new scroll event on the parent (?).
-    $('.modal-body, .scrolling_list, input, textarea').mousewheel(function (e, delta) {
+    $('.modal-body, .scrolling_list, input, textarea').on('wheel', function (e) {
         var self = $(this);
         var scroll = self.scrollTop();
+        var delta = e.originalEvent.deltaY;
 
         // The -1 fudge factor is important here due to rounding errors.  Better
         // to err on the side of not scrolling.
         var max_scroll = this.scrollHeight - self.innerHeight() - 1;
 
         e.stopPropagation();
-        if (   ((delta > 0) && (scroll <= 0))
-            || ((delta < 0) && (scroll >= max_scroll))) {
+        if (((delta < 0) && (scroll <= 0)) ||
+            ((delta > 0) && (scroll >= max_scroll))) {
             e.preventDefault();
         }
     });
 
     // Ignore wheel events in the compose area which weren't already handled above.
-    $('#compose').mousewheel(function (e) {
+    $('#compose').on('wheel', function (e) {
         e.stopPropagation();
         e.preventDefault();
     });
@@ -111,6 +113,10 @@ $(function () {
 
     if (!page_params.left_side_userlist) {
         $("#navbar-buttons").addClass("right-userlist");
+    }
+
+    if (page_params.high_contrast_mode) {
+        $("body").addClass("high-contrast");
     }
 
     $("#main_div").on("mouseover", ".message_row", function () {
@@ -181,13 +187,14 @@ $(function () {
                 });
             }
             if (event.target_scroll_offset !== undefined) {
-                message_viewport.set_message_offset(event.target_scroll_offset);
+                current_msg_list.view.set_message_offset(event.target_scroll_offset);
             } else {
                 // Scroll to place the message within the current view;
                 // but if this is the initial placement of the pointer,
                 // just place it in the very center
-                message_viewport.recenter_view(row, {from_scroll: event.from_scroll,
-                                    force_center: event.previously_selected === -1});
+                message_viewport.recenter_view(row,
+                                               {from_scroll: event.from_scroll,
+                                                force_center: event.previously_selected === -1});
             }
         }
     });
@@ -199,11 +206,17 @@ $(function () {
         timerender.set_full_datetime(message, time_elem);
     });
 
-    $('#streams_header h4').tooltip({ placement: 'right',
-                                       animation: false });
+    $('#streams_header h4').tooltip({placement: 'right',
+                                     animation: false});
 
-    $('#streams_header i[data-toggle="tooltip"]').tooltip({ placement: 'left',
-                                       animation: false });
+    $('#streams_header i[data-toggle="tooltip"]').tooltip({placement: 'left',
+                                                           animation: false});
+
+    $('#userlist-header #userlist-title').tooltip({placement: 'right',
+                                                   animation: false});
+
+    $('#userlist-header #user_filter_icon').tooltip({placement: 'left',
+                                                     animation: false});
 
     $('.message_failed i[data-toggle="tooltip"]').tooltip();
 
@@ -240,21 +253,40 @@ $(function () {
     }
 
     // initialize other stuff
-    reload.initialize();
+    server_events.initialize();
     people.initialize();
-    markdown.initialize();
-    composebox_typeahead.initialize();
+    compose_pm_pill.initialize();
+    reload.initialize();
+    user_groups.initialize();
+    unread.initialize();
+    bot_data.initialize(); // Must happen after people.initialize()
+    message_fetch.initialize();
+    message_scroll.initialize();
+    emoji.initialize();
+    markdown.initialize(); // Must happen after emoji.initialize()
+    compose.initialize();
+    composebox_typeahead.initialize(); // Must happen after compose.initialize()
     search.initialize();
     tutorial.initialize();
     notifications.initialize();
     gear_menu.initialize();
     settings_sections.initialize();
+    settings_toggle.initialize();
     hashchange.initialize();
     pointer.initialize();
     unread_ui.initialize();
     activity.initialize();
-    emoji.initialize();
+    emoji_picker.initialize();
+    compose_fade.initialize();
+    pm_list.initialize();
+    stream_list.initialize();
+    drafts.initialize();
+    sent_messages.initialize();
     hotspots.initialize();
+    info_overlay.initialize();
+    ui.initialize();
+    panels.initialize();
+    typing.initialize();
 });
 
 

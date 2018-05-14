@@ -1,4 +1,4 @@
-// Read https://zulip.readthedocs.io/en/latest/hashchange-system.html
+// Read https://zulip.readthedocs.io/en/latest/subsystems/hashchange-system.html
 var hashchange = (function () {
 
 var exports = {};
@@ -85,7 +85,7 @@ exports.parse_narrow = function (hash) {
             }
             operators.push({negated: negated, operator: operator, operand: operand});
         } catch (err) {
-            return undefined;
+            return;
         }
     }
     return operators;
@@ -131,13 +131,16 @@ function do_hashchange(from_reload) {
             return false;
         }
         var narrow_opts = {
-            select_first_unread: true,
             change_hash:    false,  // already set
             trigger: 'hash change',
         };
-        if (from_reload && page_params.initial_narrow_pointer !== undefined) {
-            narrow_opts.from_reload = true;
-            narrow_opts.first_unread_from_server = true;
+        if (from_reload) {
+            blueslip.debug('We are narrowing as part of a reload.');
+            if (page_params.initial_narrow_pointer !== undefined) {
+                home_msg_list.pre_narrow_offset = page_params.initial_offset;
+                narrow_opts.then_select_id = page_params.initial_narrow_pointer;
+                narrow_opts.then_select_offset = page_params.initial_narrow_offset;
+            }
         }
         narrow.activate(operators, narrow_opts);
         floating_recipient_bar.update();
@@ -148,6 +151,15 @@ function do_hashchange(from_reload) {
         break;
     case "#streams":
         ui_util.change_tab_to("#streams");
+        break;
+    case "#keyboard-shortcuts":
+        info_overlay.show("keyboard-shortcuts");
+        break;
+    case "#markdown-help":
+        info_overlay.show("markdown-help");
+        break;
+    case "#search-operators":
+        info_overlay.show("search-operators");
         break;
     case "#drafts":
         ui_util.change_tab_to("#drafts");
@@ -169,7 +181,7 @@ function do_hashchange(from_reload) {
 // return `true` for the current state -- we want to ignore hash changes from
 // within the settings page. The previous hash however should return `false` as it
 // was outside of the scope of settings.
-// there is then an `exit_modal` function that allows the hash to change exactly
+// there is then an `exit_overlay` function that allows the hash to change exactly
 // once without triggering any events. This allows the hash to reset back from
 // a settings page to the previous view available before the settings page
 // (eg. narrow/is/private). This saves the state, scroll position, and makes the
@@ -243,7 +255,7 @@ function hashchanged(from_reload, e) {
 
         if (!should_ignore(old_hash || "#") || ignore.group !== get_hash_group(base)) {
             if (ignore.group !== get_hash_group(base)) {
-                modals.close_for_hash_change();
+                overlays.close_for_hash_change();
             }
 
             // now only if the previous one should not have been ignored.
@@ -267,15 +279,15 @@ function hashchanged(from_reload, e) {
             subs.change_state(get_hash_components());
         }
     } else if (!should_ignore(window.location.hash) && !ignore.flag) {
-        modals.close_for_hash_change();
+        overlays.close_for_hash_change();
         changing_hash = true;
         var ret = do_hashchange(from_reload);
         changing_hash = false;
         return ret;
     // once we unignore the hash, we have to set the hash back to what it was
-    // originally (eg. '#narrow/stream/Denmark' instead of '#settings'). We
+    // originally (eg. '#narrow/stream/999-Denmark' instead of '#settings'). We
     // therefore ignore the hash change once more while we change it back for
-    // no iterruptions.
+    // no interruptions.
     } else if (ignore.flag) {
         ignore.flag = false;
     }
@@ -290,7 +302,7 @@ exports.initialize = function () {
     hashchanged(true);
 };
 
-exports.exit_modal = function (callback) {
+exports.exit_overlay = function (callback) {
     if (should_ignore(window.location.hash)) {
         ui_util.blur_active_element();
         ignore.flag = true;

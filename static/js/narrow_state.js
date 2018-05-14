@@ -41,7 +41,7 @@ exports.update_email = function (user_id, new_email) {
 /* Operators we should send to the server. */
 exports.public_operators = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     return current_filter.public_operators();
 };
@@ -73,7 +73,8 @@ function collect_single(operators) {
 // This logic is here and not in the 'compose' module because
 // it will get more complicated as we add things to the narrow
 // operator language.
-exports.set_compose_defaults = function (opts) {
+exports.set_compose_defaults = function () {
+    var opts = {};
     var single = collect_single(exports.operators());
 
     // Set the stream, subject, and/or PM recipient if they are
@@ -90,11 +91,12 @@ exports.set_compose_defaults = function (opts) {
     if (single.has('pm-with')) {
         opts.private_message_recipient = single.get('pm-with');
     }
+    return opts;
 };
 
 exports.stream = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     var stream_operands = current_filter.operands("stream");
     if (stream_operands.length === 1) {
@@ -104,19 +106,164 @@ exports.stream = function () {
         // name (considering renames and capitalization).
         return stream_data.get_name(name);
     }
-    return undefined;
+    return;
+};
+
+exports.stream_sub = function () {
+    if (current_filter === undefined) {
+        return;
+    }
+    var stream_operands = current_filter.operands("stream");
+    if (stream_operands.length !== 1) {
+        return;
+    }
+
+    var name = stream_operands[0];
+    var sub = stream_data.get_sub_by_name(name);
+
+    return sub;
+};
+
+exports.stream_id = function () {
+    var sub = exports.stream_sub();
+
+    if (!sub) {
+        return;
+    }
+
+    return sub.stream_id;
 };
 
 exports.topic = function () {
     if (current_filter === undefined) {
-        return undefined;
+        return;
     }
     var operands = current_filter.operands("topic");
     if (operands.length === 1) {
         return operands[0];
     }
-    return undefined;
+    return;
 };
+
+exports.pm_string = function () {
+    // If you are narrowed to a PM conversation
+    // with users 4, 5, and 99, this will return "4,5,99"
+
+    if (current_filter === undefined) {
+        return;
+    }
+
+    var operands = current_filter.operands("pm-with");
+    if (operands.length !== 1) {
+        return;
+    }
+
+    var emails_string = operands[0];
+
+    if (!emails_string) {
+        return;
+    }
+
+    var user_ids_string = people.emails_strings_to_user_ids_string(emails_string);
+
+    return user_ids_string;
+};
+
+exports.get_first_unread_info = function () {
+    if ((current_filter === undefined) || !current_filter.can_apply_locally()) {
+        // we expect our callers to make sure a "local" narrow
+        // makes sense (and we don't yet support the all-messages view)
+        blueslip.error('unexpected call to get_first_unread_info');
+        return {
+            flavor: 'cannot_compute',
+        };
+    }
+
+    var unread_ids = exports._possible_unread_message_ids();
+
+    if (unread_ids === undefined) {
+        // _possible_unread_message_ids() only works for certain narrows
+        return {
+            flavor: 'cannot_compute',
+        };
+    }
+
+    var msg_id = current_filter.first_valid_id_from(unread_ids);
+
+    if (msg_id === undefined) {
+        return {
+            flavor: 'not_found',
+        };
+    }
+
+
+    return {
+        flavor: 'found',
+        msg_id: unread_ids[0],
+    };
+};
+
+exports._possible_unread_message_ids = function () {
+    // This function currently only returns valid results for
+    // certain types of narrows, mostly left sidebar narrows.
+    // For more complicated narrows we may return undefined.
+    //
+    // If we do return a result, it will be a subset of unread
+    // message ids but possibly a superset of unread message ids
+    // that match our filter.
+    if (current_filter === undefined) {
+        return;
+    }
+
+    var stream_id;
+    var topic_name;
+    var pm_string;
+
+    if (current_filter.can_bucket_by('stream', 'topic')) {
+        stream_id = exports.stream_id();
+        if (stream_id === undefined) {
+            return [];
+        }
+        topic_name = exports.topic();
+        return unread.get_msg_ids_for_topic(stream_id, topic_name);
+    }
+
+    if (current_filter.can_bucket_by('stream')) {
+        stream_id = exports.stream_id();
+        if (stream_id === undefined) {
+            return [];
+        }
+        return unread.get_msg_ids_for_stream(stream_id);
+    }
+
+    if (current_filter.can_bucket_by('pm-with')) {
+        pm_string = exports.pm_string();
+        if (pm_string === undefined) {
+            return [];
+        }
+        return unread.get_msg_ids_for_person(pm_string);
+    }
+
+    if (current_filter.can_bucket_by('is-private')) {
+        return unread.get_msg_ids_for_private();
+    }
+
+    if (current_filter.can_bucket_by('is-mentioned')) {
+        return unread.get_msg_ids_for_mentions();
+    }
+
+    if (current_filter.can_bucket_by('is-starred')) {
+        return unread.get_msg_ids_for_starred();
+    }
+
+    if (current_filter.can_bucket_by('sender')) {
+        // TODO: see #9352 to make this more efficient
+        return unread.get_all_msg_ids();
+    }
+
+    return;
+};
+
 
 // Are we narrowed to PMs: all PMs or PMs with particular people.
 exports.narrowed_to_pms = function () {
@@ -153,6 +300,15 @@ exports.narrowed_by_reply = function () {
             exports.narrowed_by_topic_reply());
 };
 
+exports.narrowed_by_stream_reply = function () {
+    if (current_filter === undefined) {
+        return false;
+    }
+    var operators = current_filter.operators();
+    return (operators.length === 1 &&
+            current_filter.operands("stream").length === 1);
+};
+
 exports.narrowed_to_topic = function () {
     if (current_filter === undefined) {
         return false;
@@ -174,20 +330,13 @@ exports.is_for_stream_id = function (stream_id) {
     // This is not perfect, since we still track narrows by
     // name, not id, but at least the interface is good going
     // forward.
-    var sub = stream_data.get_sub_by_id(stream_id);
+    var narrow_stream_id = exports.stream_id();
 
-    if (sub === undefined) {
-        blueslip.error('Bad stream id ' + stream_id);
+    if (narrow_stream_id === undefined) {
         return false;
     }
 
-    var narrow_stream_name = exports.stream();
-
-    if (narrow_stream_name === undefined) {
-        return false;
-    }
-
-    return (sub.name === narrow_stream_name);
+    return (stream_id === narrow_stream_id);
 };
 
 return exports;

@@ -1,5 +1,5 @@
-var typing_data = require("js/typing_data.js");
-
+zrequire("util");
+zrequire("typing_data");
 
 (function test_basics() {
     // The typing_data needs to be robust with lists of

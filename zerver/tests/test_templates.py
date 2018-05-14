@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 import re
 from typing import Any, Dict, Iterable
@@ -14,20 +13,19 @@ from zerver.lib.test_helpers import get_all_templates
 from zerver.lib.test_classes import (
     ZulipTestCase,
 )
+from zerver.lib.test_runner import slow
 from zerver.context_processors import common_context
 
 
-class get_form_value(object):
-    def __init__(self, value):
-        # type: (Any) -> None
+class get_form_value:
+    def __init__(self, value: Any) -> None:
         self._value = value
 
-    def value(self):
-        # type: () -> Any
+    def value(self) -> Any:
         return self._value
 
 
-class DummyForm(dict):
+class DummyForm(Dict[str, Any]):
     pass
 
 
@@ -41,9 +39,9 @@ class TemplateTestCase(ZulipTestCase):
     is done that the output looks right).  Please see `get_context`
     function documentation for more information.
     """
+    @slow("Tests a large number of different templates")
     @override_settings(TERMS_OF_SERVICE=None)
-    def test_templates(self):
-        # type: () -> None
+    def test_templates(self) -> None:
 
         # Just add the templates whose context has a conflict with other
         # templates' context in `defer`.
@@ -58,9 +56,7 @@ class TemplateTestCase(ZulipTestCase):
 
         logged_out = [
             'confirmation/confirm.html',  # seems unused
-            'confirmation/confirm_mituser.html',  # seems unused
             'zerver/compare.html',
-            'zerver/landing_nav_blue.html',
             'zerver/footer.html',
         ]
 
@@ -81,27 +77,25 @@ class TemplateTestCase(ZulipTestCase):
             'zerver/settings_sidebar.html',
             'zerver/stream_creation_prompt.html',
             'zerver/subscriptions.html',
-            'zerver/tutorial_finale.html',
             'zerver/message_history.html',
+            'zerver/delete_message.html',
         ]
         unusual = [
-            'zerver/emails/confirm_registration_mit.txt',
-            'zerver/emails/confirm_registration_mit.subject',
-            'zerver/emails/invitation_mit.txt',
-            'zerver/emails/invitation_mit.subject',
             'zerver/emails/confirm_new_email.subject',
-            'zerver/emails/confirm_new_email.html',
+            'zerver/emails/compiled/confirm_new_email.html',
             'zerver/emails/confirm_new_email.txt',
             'zerver/emails/notify_change_in_email.subject',
+            'zerver/emails/compiled/notify_change_in_email.html',
             'zerver/emails/digest.subject',
             'zerver/emails/digest.html',
             'zerver/emails/digest.txt',
             'zerver/emails/followup_day1.subject',
-            'zerver/emails/followup_day1.html',
+            'zerver/emails/compiled/followup_day1.html',
             'zerver/emails/followup_day1.txt',
             'zerver/emails/followup_day2.subject',
             'zerver/emails/followup_day2.txt',
-            'zerver/emails/followup_day2.html',
+            'zerver/emails/compiled/followup_day2.html',
+            'zerver/emails/compiled/password_reset.html',
             'corporate/mit.html',
             'corporate/zephyr.html',
             'corporate/zephyr-mirror.html',
@@ -111,7 +105,7 @@ class TemplateTestCase(ZulipTestCase):
             'zilencer/enterprise_tos_accept_body.txt',
             'zerver/zulipchat_migration_tos.html',
             'zilencer/enterprise_tos_accept_body.txt',
-            'zerver/closed_realm.html',
+            'zerver/invalid_email.html',
             'zerver/topic_is_muted.html',
             'zerver/bankruptcy.html',
             'zerver/lightbox_overlay.html',
@@ -121,22 +115,30 @@ class TemplateTestCase(ZulipTestCase):
             'zerver/base.html',
             'zerver/api_content.json',
             'zerver/handlebars_compilation_failed.html',
+            'zerver/portico-header.html',
+            'zerver/deprecation_notice.html',
+            'two_factor/_wizard_forms.html',
         ]
 
         integrations_regexp = re.compile('zerver/integrations/.*.html')
 
+        # Since static/generated/bots/ is searched by Jinja2 for templates,
+        # it mistakes logo files under that directory for templates.
+        bot_logos_regexp = re.compile('\w+\/logo\.(svg|png)$')
+
         skip = covered + defer + logged_out + logged_in + unusual + ['tests/test_markdown.html',
                                                                      'zerver/terms.html',
                                                                      'zerver/privacy.html']
-        templates = [t for t in get_all_templates() if not (t in skip or integrations_regexp.match(t))]
+
+        templates = [t for t in get_all_templates() if not (
+            t in skip or integrations_regexp.match(t) or bot_logos_regexp.match(t))]
         self.render_templates(templates, self.get_context())
 
         # Test the deferred templates with updated context.
         update = {'data': [('one', 'two')]}
         self.render_templates(defer, self.get_context(**update))
 
-    def render_templates(self, templates, context):
-        # type: (Iterable[str], Dict[str, Any]) -> None
+    def render_templates(self, templates: Iterable[str], context: Dict[str, Any]) -> None:
         for template_name in templates:
             template = get_template(template_name)
             try:
@@ -145,8 +147,7 @@ class TemplateTestCase(ZulipTestCase):
                 logging.error("Exception while rendering '{}'".format(template.template.name))
                 raise
 
-    def get_context(self, **kwargs):
-        # type: (**Any) -> Dict[str, Any]
+    def get_context(self, **kwargs: Any) -> Dict[str, Any]:
         """Get the dummy context for shallow testing.
 
         The context returned will always contain a parameter called
@@ -181,14 +182,11 @@ class TemplateTestCase(ZulipTestCase):
                 emails=get_form_value(email),
             ),
             current_url=lambda: 'www.zulip.com',
-            hubot_lozenges_dict={},
             integrations_dict={},
             referrer=dict(
                 full_name='John Doe',
                 realm=dict(name='zulip.com'),
             ),
-            uid='uid',
-            token='token',
             message_count=0,
             messages=[dict(header='Header')],
             new_streams=dict(html=''),
@@ -198,14 +196,13 @@ class TemplateTestCase(ZulipTestCase):
                          "device_ip": "127.0.0.1",
                          "login_time": "9:33am NewYork, NewYork",
                          },
-            zulip_support="zulip-admin@example.com",
+            api_uri_context={},
         )
 
         context.update(kwargs)
         return context
 
-    def test_markdown_in_template(self):
-        # type: () -> None
+    def test_markdown_in_template(self) -> None:
         template = get_template("tests/test_markdown.html")
         context = {
             'markdown_test_file': "zerver/tests/markdown/test_markdown.md"
@@ -216,16 +213,14 @@ class TemplateTestCase(ZulipTestCase):
         self.assertEqual(content_sans_whitespace,
                          'header<h1id="hello">Hello!</h1><p>Thisissome<em>boldtext</em>.</p>footer')
 
-    def test_custom_tos_template(self):
-        # type: () -> None
+    def test_custom_tos_template(self) -> None:
         response = self.client_get("/terms/")
 
         self.assert_in_success_response([u"Thanks for using our products and services (\"Services\"). ",
                                          u"By using our Services, you are agreeing to these terms"],
                                         response)
 
-    def test_custom_terms_of_service_template(self):
-        # type: () -> None
+    def test_custom_terms_of_service_template(self) -> None:
         not_configured_message = 'This installation of Zulip does not have a configured ' \
                                  'terms of service'
         with self.settings(TERMS_OF_SERVICE=None):
@@ -236,8 +231,7 @@ class TemplateTestCase(ZulipTestCase):
         self.assert_in_success_response(['This is some <em>bold text</em>.'], response)
         self.assert_not_in_success_response([not_configured_message], response)
 
-    def test_custom_privacy_policy_template(self):
-        # type: () -> None
+    def test_custom_privacy_policy_template(self) -> None:
         not_configured_message = 'This installation of Zulip does not have a configured ' \
                                  'privacy policy'
         with self.settings(PRIVACY_POLICY=None):

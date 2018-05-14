@@ -42,12 +42,12 @@ function reset_error_messages() {
 }
 
 function prepare_form_to_be_shown() {
-    $("#invitee_emails").val("");
     update_subscription_checkboxes();
     reset_error_messages();
 }
 
 exports.initialize = function () {
+    ui.set_up_scrollbar($("#invite_user_form .modal-body"));
     var invite_status = $('#invite_status');
     var invitee_emails = $("#invitee_emails");
     var invitee_emails_group = invitee_emails.closest('.control-group');
@@ -70,17 +70,14 @@ exports.initialize = function () {
         },
         success: function () {
             $('#submit-invitation').button('reset');
-            invite_status.text(i18n.t('User invited successfully.', {count: (invitee_emails.val().match(/@/g) || [] ).length}))
-                          .addClass('alert-success')
-                          .show();
+            invite_status.text(i18n.t('User(s) invited successfully.'))
+                .addClass('alert-success')
+                .show();
             invitee_emails.val('');
 
             if (page_params.development_environment) {
-                // line-wrapped to avoid the i18n linter, since we don't want to translate this.
-                $('#dev_env_msg').text(
-                    'In the Zulip development environment, outgoing emails are printed to the run-dev.py console.')
-                    .addClass('alert-info')
-                    .show();
+                var rendered_email_msg = templates.render('dev_env_email_access');
+                $('#dev_env_msg').html(rendered_email_msg).addClass('alert-info').show();
             }
 
         },
@@ -90,8 +87,8 @@ exports.initialize = function () {
             if (arr.errors === undefined) {
                 // There was a fatal error, no partial processing occurred.
                 invite_status.text(arr.msg)
-                              .addClass('alert-error')
-                              .show();
+                    .addClass('alert-error')
+                    .show();
             } else {
                 // Some users were not invited.
                 var invitee_emails_errored = [];
@@ -102,17 +99,14 @@ exports.initialize = function () {
                 });
 
                 invite_status.addClass('alert-warning')
-                              .empty()
-                              .append($('<p>').text(arr.msg))
-                              .append(error_list)
-                              .show();
+                    .empty()
+                    .append($('<p>').text(arr.msg))
+                    .append(error_list)
+                    .show();
                 invitee_emails_group.addClass('warning');
 
                 if (arr.sent_invitations) {
                     invitee_emails.val(invitee_emails_errored.join('\n'));
-                } else { // Invitations not sent -- keep all emails in the list
-                    var current_emails = invitee_emails.val().split(/\n|,/);
-                    invitee_emails.val(util.move_array_elements_to_front(current_emails, invitee_emails_errored).join('\n'));
                 }
 
             }
@@ -120,11 +114,11 @@ exports.initialize = function () {
         },
     });
 
-    modals.open_overlay({
+    overlays.open_overlay({
         name: 'invite',
         overlay: $('#invite-user'),
         on_close: function () {
-            hashchange.exit_modal();
+            hashchange.exit_overlay();
         },
     });
 };

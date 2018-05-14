@@ -19,8 +19,29 @@ exports.sub_list_generator = function (lst, lower, upper) {
     };
 };
 
+exports.reverse_sub_list_generator = function (lst, lower, upper) {
+    // lower/upper has Python range semantics so if you pass
+    // in lower=5 and upper=8, you get elements 7/6/5
+    var i = upper - 1;
+
+    return {
+        next: function () {
+            if (i < lower) {
+                return;
+            }
+            var res = lst[i];
+            i -= 1;
+            return res;
+        },
+    };
+};
+
 exports.list_generator = function (lst) {
     return exports.sub_list_generator(lst, 0, lst.length);
+};
+
+exports.reverse_list_generator = function (lst) {
+    return exports.reverse_sub_list_generator(lst, 0, lst.length);
 };
 
 exports.fchain = function (outer_gen, get_inner_gen) {
@@ -69,8 +90,8 @@ exports.wrap = function (lst, val) {
     }
 
     var inners = [
-         exports.sub_list_generator(lst, i, lst.length),
-         exports.sub_list_generator(lst, 0, i),
+        exports.sub_list_generator(lst, i, lst.length),
+        exports.sub_list_generator(lst, 0, i),
     ];
 
     return exports.chain(inners);
@@ -87,8 +108,26 @@ exports.wrap_exclude = function (lst, val) {
     }
 
     var inners = [
-         exports.sub_list_generator(lst, i+1, lst.length),
-         exports.sub_list_generator(lst, 0, i),
+        exports.sub_list_generator(lst, i+1, lst.length),
+        exports.sub_list_generator(lst, 0, i),
+    ];
+
+    return exports.chain(inners);
+};
+
+exports.reverse_wrap_exclude = function (lst, val) {
+    if (val === undefined) {
+        return exports.reverse_list_generator(lst);
+    }
+
+    var i = _.indexOf(lst, val);
+    if (i < 0) {
+        return exports.reverse_list_generator(lst);
+    }
+
+    var inners = [
+        exports.reverse_sub_list_generator(lst, 0, i),
+        exports.reverse_sub_list_generator(lst, i+1, lst.length),
     ];
 
     return exports.chain(inners);
@@ -159,12 +198,20 @@ exports.get_next_topic = function (curr_stream, curr_topic) {
     var my_streams = stream_sort.get_streams();
 
     my_streams = _.filter(my_streams, function (stream_name) {
-        return stream_data.name_in_home_view(stream_name);
+        if (stream_data.name_in_home_view(stream_name)) {
+            return true;
+        }
+        if  (stream_name === curr_stream) {
+            // We can use n within a muted stream if we are
+            // currently narrowed to it.
+            return true;
+        }
+        return false;
     });
 
     function get_unmuted_topics(stream_name) {
-        var topic_objs = stream_data.get_recent_topics(stream_name) || [];
-        var topics = _.map(topic_objs, function (obj) { return obj.subject; });
+        var stream_id = stream_data.get_stream_id(stream_name);
+        var topics = topic_data.get_recent_names(stream_id);
         topics = _.reject(topics, function (topic) {
             return muting.is_topic_muted(stream_name, topic);
         });
@@ -183,6 +230,41 @@ exports.get_next_topic = function (curr_stream, curr_topic) {
         curr_stream,
         curr_topic
     );
+};
+
+exports._get_pm_gen = function (curr_pm) {
+    var my_pm_strings = pm_conversations.recent.get_strings();
+    var gen = exports.wrap_exclude(my_pm_strings, curr_pm);
+    return gen;
+};
+
+exports._get_unread_pm_gen = function (curr_pm) {
+    var pm_gen = exports._get_pm_gen(curr_pm);
+
+    function has_unread(user_ids_string) {
+        var num_unread = unread.num_unread_for_person(user_ids_string);
+        return num_unread > 0;
+    }
+
+    var gen = exports.filter(pm_gen, has_unread);
+    return gen;
+};
+
+exports.get_next_unread_pm_string = function (curr_pm) {
+    var gen = exports._get_unread_pm_gen(curr_pm);
+    return gen.next();
+};
+
+exports.get_next_stream = function (curr_stream) {
+    var my_streams = stream_sort.get_streams();
+    var stream_gen = exports.wrap_exclude(my_streams, curr_stream);
+    return stream_gen.next();
+};
+
+exports.get_prev_stream = function (curr_stream) {
+    var my_streams = stream_sort.get_streams();
+    var stream_gen = exports.reverse_wrap_exclude(my_streams, curr_stream);
+    return stream_gen.next();
 };
 
 return exports;

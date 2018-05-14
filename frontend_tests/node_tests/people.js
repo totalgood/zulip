@@ -1,16 +1,19 @@
-add_dependencies({
-    util: 'js/util.js',
+zrequire('util');
+zrequire('people');
+
+set_global('blueslip', global.make_zblueslip({
+    error: false, // We check for errors in people_errors.js
+}));
+set_global('page_params', {});
+set_global('md5', function (s) {
+    return 'md5-' + s;
 });
-
-var people = require("js/people.js");
-set_global('blueslip', {});
-
-var _ = global._;
 
 var me = {
     email: 'me@example.com',
     user_id: 30,
     full_name: 'Me Myself',
+    timezone: 'US/Pacific',
 };
 
 function initialize() {
@@ -49,22 +52,44 @@ initialize();
     assert.equal(person.email, email);
     person = people.get_by_email(email);
     assert.equal(person.full_name, full_name);
-    person = people.realm_get(email);
+    person = people.get_active_user_for_email(email);
     assert(!person);
     people.add_in_realm(isaac);
     assert.equal(people.get_realm_count(), 1);
-    person = people.realm_get(email);
+    person = people.get_active_user_for_email(email);
     assert.equal(person.email, email);
 
     realm_persons = people.get_realm_persons();
     assert.equal(_.size(realm_persons), 1);
     assert.equal(realm_persons[0].full_name, 'Isaac Newton');
 
+    var active_user_ids = people.get_active_user_ids();
+    assert.deepEqual(active_user_ids, [isaac.user_id]);
+    assert.equal(people.is_active_user_for_popover(isaac.user_id), true);
+    assert(people.is_valid_email_for_compose(isaac.email));
+
     // Now deactivate isaac
     people.deactivate(isaac);
-    person = people.realm_get(email);
+    person = people.get_active_user_for_email(email);
     assert(!person);
     assert.equal(people.get_realm_count(), 0);
+    assert.equal(people.is_active_user_for_popover(isaac.user_id), false);
+    assert.equal(people.is_valid_email_for_compose(isaac.email), false);
+
+    var bot_botson = {
+        email: 'botson-bot@example.com',
+        user_id: 35,
+        full_name: 'Bot Botson',
+        is_bot: true,
+    };
+    people.add_in_realm(bot_botson);
+    assert.equal(people.is_active_user_for_popover(bot_botson.user_id), true);
+
+    // Invalid user ID returns false and warns.
+    blueslip.set_test_data('warn', 'Unexpectedly invalid user_id in user popover query: 123412');
+    assert.equal(people.is_active_user_for_popover(123412), false);
+    assert.equal(blueslip.get_test_logs('warn').length, 1);
+    blueslip.clear_test_data();
 
     // We can still get their info for non-realm needs.
     person = people.get_by_email(email);
@@ -73,11 +98,58 @@ initialize();
     // The current user should still be there
     person = people.get_by_email('me@example.com');
     assert.equal(person.full_name, 'Me Myself');
+
+    // Test undefined people
+    assert.equal(people.is_cross_realm_email('unknown@example.com'), undefined);
+    assert.equal(people.get_active_user_for_email('unknown@example.com'), undefined);
+
+    // Test is_my_user_id function
+    assert.equal(people.is_my_user_id(me.user_id), true);
+    assert.equal(people.is_my_user_id(isaac.user_id), false);
+    assert.equal(people.is_my_user_id(undefined), false);
+}());
+
+(function test_pm_lookup_key() {
+    assert.equal(people.pm_lookup_key('30'), '30');
+    assert.equal(people.pm_lookup_key('32,30'), '32');
+    assert.equal(people.pm_lookup_key('101,32,30'), '32,101');
 }());
 
 (function test_get_recipients() {
     assert.equal(people.get_recipients('30'), 'Me Myself');
     assert.equal(people.get_recipients('30,32'), 'Isaac Newton');
+}());
+
+(function test_my_custom_profile_data() {
+    var person = people.get_by_email(me.email);
+    person.profile_data = {3: 'My address', 4: 'My phone number'};
+    assert.equal(people.my_custom_profile_data(3), 'My address');
+    assert.equal(people.my_custom_profile_data(4), 'My phone number');
+    assert.equal(people.my_custom_profile_data(undefined), undefined);
+}());
+
+(function test_user_timezone() {
+    var expected_pref = {
+        timezone: 'US/Pacific',
+        format: 'HH:mm',
+    };
+
+    global.page_params.twenty_four_hour_time = true;
+    assert.deepEqual(people.get_user_time_preferences(me.user_id), expected_pref);
+
+    expected_pref.format = 'hh:mm A';
+    global.page_params.twenty_four_hour_time = false;
+    assert.deepEqual(people.get_user_time_preferences(me.user_id), expected_pref);
+
+    zrequire('actual_moment', 'moment-timezone');
+    set_global('moment', function () { return global.actual_moment('20130208T080910'); });
+
+    global.page_params.twenty_four_hour_time = true;
+    assert.equal(people.get_user_time(me.user_id), '00:09');
+
+    expected_pref.format = 'hh:mm A';
+    global.page_params.twenty_four_hour_time = false;
+    assert.equal(people.get_user_time(me.user_id), '12:09 AM');
 }());
 
 (function test_updates() {
@@ -108,10 +180,22 @@ initialize();
     // now it takes a full person object.  Note that deactivate()
     // won't actually make the user disappear completely.
     people.deactivate(person);
-    person = people.realm_get('mary@example.com');
+    person = people.get_active_user_for_email('mary@example.com');
     assert.equal(person, undefined);
     person = people.get_person_from_user_id(42);
     assert.equal(person.user_id, 42);
+}());
+
+initialize();
+
+(function test_set_custom_profile_field_data() {
+    var person = people.get_by_email(me.email);
+    me.profile_data = {};
+    var field = {id: 3, name: 'Custom long field', type: 'text', value: 'Field value'};
+    people.set_custom_profile_field_data(person.user_id, {});
+    assert.deepEqual(person.profile_data, {});
+    people.set_custom_profile_field_data(person.user_id, field);
+    assert.equal(person.profile_data[field.id], 'Field value');
 }());
 
 (function test_get_rest_of_realm() {
@@ -158,7 +242,7 @@ initialize();
 }());
 
 (function test_filtered_users() {
-     var charles = {
+    var charles = {
         email: 'charles@example.com',
         user_id: 301,
         full_name: 'Charles Dickens',
@@ -178,11 +262,23 @@ initialize();
         user_id: 304,
         full_name: 'Linus Torvalds',
     };
+    var noah = {
+        email: 'emnoa@example.com',
+        user_id: 305,
+        full_name: 'Nöôáàh Ëmerson',
+    };
+    var plain_noah = {
+        email: 'otheremnoa@example.com',
+        user_id: 306,
+        full_name: 'Nooaah Emerson',
+    };
 
     people.add_in_realm(charles);
     people.add_in_realm(maria);
     people.add_in_realm(ashton);
     people.add_in_realm(linus);
+    people.add_in_realm(noah);
+    people.add_in_realm(plain_noah);
 
     var search_term = 'a';
     var users = people.get_rest_of_realm();
@@ -204,6 +300,29 @@ initialize();
     assert(filtered_people.has(charles.user_id));
     assert(filtered_people.has(maria.user_id));
 
+    // Test filtering of names with diacritics
+    // This should match Nöôáàh by ignoring diacritics, and also match Nooaah
+    filtered_people = people.filter_people_by_search_terms(users, ['noOa']);
+    assert.equal(filtered_people.num_items(), 2);
+    assert(filtered_people.has(noah.user_id));
+    assert(filtered_people.has(plain_noah.user_id));
+
+    // This should match ëmerson, but not emerson
+    filtered_people = people.filter_people_by_search_terms(users, ['ëm']);
+    assert.equal(filtered_people.num_items(), 1);
+    assert(filtered_people.has(noah.user_id));
+
+    // Test filtering with undefined user
+    var foo = {
+        email: 'foo@example.com',
+        user_id: 42,
+        full_name: 'Foo Bar',
+    };
+    users.push(foo);
+
+    filtered_people = people.filter_people_by_search_terms(users, ['ltorv']);
+    assert.equal(filtered_people.num_items(), 1);
+    assert(filtered_people.has(linus.user_id));
 }());
 
 people.init();
@@ -252,13 +371,15 @@ initialize();
         avatar_url: 'charles.com/foo.png',
     };
     var maria = {
-        email: 'athens@example.com',
+        email: 'Athens@example.com',
         user_id: 452,
         full_name: 'Maria Athens',
     };
     people.add(charles);
     people.add(maria);
 
+    assert.equal(people.small_avatar_url_for_person(maria),
+                 'https://secure.gravatar.com/avatar/md5-athens@example.com?d=identicon&s=50');
     var message = {
         type: 'private',
         display_recipient: [
@@ -270,9 +391,9 @@ initialize();
     };
     assert.equal(people.pm_with_url(message), '#narrow/pm-with/451,452-group');
     assert.equal(people.pm_reply_to(message),
-        'athens@example.com,charles@example.com');
+                 'Athens@example.com,charles@example.com');
     assert.equal(people.small_avatar_url(message),
-        'charles.com/foo.png&s=50');
+                 'charles.com/foo.png&s=50');
 
     message = {
         type: 'private',
@@ -284,9 +405,26 @@ initialize();
     };
     assert.equal(people.pm_with_url(message), '#narrow/pm-with/452-athens');
     assert.equal(people.pm_reply_to(message),
-        'athens@example.com');
+                 'Athens@example.com');
     assert.equal(people.small_avatar_url(message),
-        'legacy.png&s=50');
+                 'legacy.png&s=50');
+
+    message = {
+        avatar_url: undefined,
+        sender_id: maria.user_id,
+    };
+    assert.equal(people.small_avatar_url(message),
+                 'https://secure.gravatar.com/avatar/md5-athens@example.com?d=identicon&s=50'
+    );
+
+    message = {
+        avatar_url: undefined,
+        sender_email: 'foo@example.com',
+        sender_id: 9999999,
+    };
+    assert.equal(people.small_avatar_url(message),
+                 'https://secure.gravatar.com/avatar/md5-foo@example.com?d=identicon&s=50'
+    );
 
     message = {
         type: 'private',
@@ -295,6 +433,128 @@ initialize();
         ],
     };
     assert.equal(people.pm_with_url(message), '#narrow/pm-with/30-me');
+
+    message = { type: 'stream' };
+    assert.equal(people.pm_with_user_ids(message), undefined);
+
+    // Test undefined user_ids
+    assert.equal(people.pm_reply_to(message), undefined);
+    assert.equal(people.pm_reply_user_string(message), undefined);
+    assert.equal(people.pm_with_url(message), undefined);
+
+    // Test sender_is_bot
+    var bot = {
+        email: 'bot@example.com',
+        user_id: 42,
+        full_name: 'Test Bot',
+        is_bot: true,
+    };
+    people.add(bot);
+
+    message = { sender_id: bot.user_id };
+    assert.equal(people.sender_is_bot(message), true);
+
+    message = { sender_id: maria.user_id };
+    assert.equal(people.sender_is_bot(message), undefined);
+
+    message = { sender_id: undefined };
+    assert.equal(people.sender_is_bot(message), false);
+}());
+
+initialize();
+
+(function test_extract_people_from_message() {
+    var unknown_user = {
+        email: 'unknown@example.com',
+        user_id: 500,
+        unknown_local_echo_user: true,
+    };
+
+    var maria = {
+        email: 'athens@example.com',
+        user_id: 452,
+        full_name: 'Maria Athens',
+    };
+
+    var message = {
+        type: 'stream',
+        sender_full_name: maria.full_name,
+        sender_id: maria.user_id,
+        sender_email: maria.email,
+    };
+    assert(!people.is_known_user_id(maria.user_id));
+
+    var reported;
+    people.report_late_add = function (user_id, email) {
+        assert.equal(user_id, maria.user_id);
+        assert.equal(email, maria.email);
+        reported = true;
+    };
+
+    people.extract_people_from_message(message);
+    assert(people.is_known_user_id(maria.user_id));
+    assert(reported);
+
+    // Get line coverage
+    people.report_late_add = function () {
+        throw Error('unexpected late add');
+    };
+
+    message = {
+        type: 'private',
+        display_recipient: [unknown_user],
+    };
+    people.extract_people_from_message(message);
+}());
+
+initialize();
+
+(function test_maybe_incr_recipient_count() {
+    var maria = {
+        email: 'athens@example.com',
+        user_id: 452,
+        full_name: 'Maria Athens',
+    };
+    people.add_in_realm(maria);
+
+    var unknown_user = {
+        email: 'unknown@example.com',
+        user_id: 500,
+        unknown_local_echo_user: true,
+    };
+
+    var message = {
+        type: 'private',
+        display_recipient: [maria],
+        sent_by_me: true,
+    };
+    assert.equal(people.get_recipient_count(maria), 0);
+    people.maybe_incr_recipient_count(message);
+    assert.equal(people.get_recipient_count(maria), 1);
+
+    // Test all the no-op conditions to get test
+    // coverage.
+    message = {
+        type: 'private',
+        sent_by_me: false,
+        display_recipient: [maria],
+    };
+    people.maybe_incr_recipient_count(message);
+    assert.equal(people.get_recipient_count(maria), 1);
+
+    message = {
+        type: 'private',
+        sent_by_me: true,
+        display_recipient: [unknown_user],
+    };
+    people.maybe_incr_recipient_count(message);
+    assert.equal(people.get_recipient_count(maria), 1);
+
+    message = {
+        type: 'stream',
+    };
+    people.maybe_incr_recipient_count(message);
+    assert.equal(people.get_recipient_count(maria), 1);
 }());
 
 (function test_slugs() {
@@ -310,6 +570,10 @@ initialize();
 
     var email = people.slug_to_emails(slug);
     assert.equal(email, 'debbie71@example.com');
+
+    // Test undefined slug
+    people.emails_strings_to_user_ids_string = function () { return; };
+    assert.equal(people.emails_to_slug(), undefined);
 }());
 
 initialize();
@@ -328,7 +592,7 @@ initialize();
 
     // Do sanity checks on our data.
     assert.equal(people.get_by_email(old_email).user_id, user_id);
-    assert.equal(people.realm_get(old_email).user_id, user_id);
+    assert.equal(people.get_active_user_for_email(old_email).user_id, user_id);
     assert (!people.is_cross_realm_email(old_email));
 
     assert.equal(people.get_by_email(new_email), undefined);
@@ -338,7 +602,7 @@ initialize();
 
     // Now look up using the new email.
     assert.equal(people.get_by_email(new_email).user_id, user_id);
-    assert.equal(people.realm_get(new_email).user_id, user_id);
+    assert.equal(people.get_active_user_for_email(new_email).user_id, user_id);
     assert (!people.is_cross_realm_email(new_email));
 
     var all_people = people.get_all_persons();
@@ -351,14 +615,13 @@ initialize();
 
     // Test shim where we can still retrieve user info using the
     // old email.
-    var warning;
-    global.blueslip.warn = function (w) {
-        warning = w;
-    };
-
+    blueslip.set_test_data('warn',
+                           'Obsolete email passed to get_by_email: ' +
+                           'FOO@example.com new email = bar@example.com');
     person = people.get_by_email(old_email);
-    assert(/Obsolete email.*FOO.*bar/.test(warning));
     assert.equal(person.user_id, user_id);
+    assert.equal(blueslip.get_test_logs('warn').length, 1);
+    blueslip.clear_test_data();
 }());
 
 initialize();
@@ -386,5 +649,56 @@ initialize();
         people.update_email_in_reply_to(reply_to, maria.user_id, 'maria@example.com'),
         'charles@example.com,maria@example.com'
     );
+
+    reply_to = '    charles@example.com,   athens@example.com, unknown@example.com';
+    assert.equal(
+        people.update_email_in_reply_to(reply_to, 9999, 'whatever'),
+        reply_to
+    );
 }());
 
+(function test_initialize() {
+    people.init();
+
+    global.page_params.realm_non_active_users = [
+        {
+            email: 'retiree@example.com',
+            user_id: 15,
+            full_name: 'Retiree',
+        },
+    ];
+
+    global.page_params.realm_users = [
+        {
+            email: 'alice@example.com',
+            user_id: 16,
+            full_name: 'Alice',
+        },
+    ];
+    global.page_params.cross_realm_bots = [
+        {
+            email: 'bot@example.com',
+            user_id: 17,
+            full_name: 'Test Bot',
+        },
+    ];
+    global.page_params.user_id = 42;
+
+    people.initialize();
+
+    assert.equal(people.get_active_user_for_email('alice@example.com').full_name, 'Alice');
+    assert.equal(people.is_active_user_for_popover(17), true);
+    assert(people.is_cross_realm_email('bot@example.com'));
+    assert(people.is_valid_email_for_compose('bot@example.com'));
+    assert(people.is_valid_email_for_compose('alice@example.com'));
+    assert(!people.is_valid_email_for_compose('retiree@example.com'));
+    assert(!people.is_valid_email_for_compose('totally-bogus-username@example.com'));
+    assert(people.is_my_user_id(42));
+
+    var fetched_retiree = people.get_person_from_user_id(15);
+    assert(fetched_retiree.full_name, 'Retiree');
+
+    assert.equal(global.page_params.realm_users, undefined);
+    assert.equal(global.page_params.cross_realm_bots, undefined);
+    assert.equal(global.page_params.realm_non_active_users, undefined);
+}());

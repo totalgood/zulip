@@ -2,11 +2,14 @@
 
 {!admin-only.md!}
 
-You can add custom linkification filters to your organization that
-automatically turn phrases in messages into links to other pages.
+Linkification filters are used to automatically translate syntax
+referring to an issue or support ticket in a message into a link to
+that issue or ticket on a third-party site. For instance, you can
+define a filter to automatically linkify #1234 to
+https://github.com/zulip/zulip/pulls/1234, Z1234 to link to that
+Zendesk ticket ID, or anything similar.
 
-{!go-to-the.md!} [Filter settings](/#organization/filter-settings)
-{!admin.md!}
+{settings_tab|filter-settings}
 
 5. In the green section labeled **Add a new filter**, find the **Regular expression**
 and **URL format string** fields.
@@ -53,3 +56,8 @@ the filter you want to delete.
 their messages.
 
     ![Custom linkification filter demo](/static/images/help/custom-filter-demo.png)
+
+9. If the pattern appears in a message topic, Zulip can't linkify the
+   text in the topic itself (since clicking a topic narrows to that
+   topic), so Zulip instead provides a little button to the right of
+   the topic that you can click to go to the appropriate URL.

@@ -6,7 +6,7 @@ var unnarrow_times;
 
 function report_narrow_time(initial_core_time, initial_free_time, network_time) {
     channel.post({
-        url: '/json/report_narrow_time',
+        url: '/json/report/narrow_times',
         data: {initial_core: initial_core_time.toString(),
                initial_free: initial_free_time.toString(),
                network: network_time.toString()},
@@ -36,13 +36,29 @@ function report_unnarrow_time() {
     var initial_free_time = unnarrow_times.initial_free_time - unnarrow_times.start_time;
 
     channel.post({
-        url: '/json/report_unnarrow_time',
+        url: '/json/report/unnarrow_times',
         data: {initial_core: initial_core_time.toString(),
                initial_free: initial_free_time.toString()},
     });
 
     unnarrow_times = {};
 }
+
+exports.save_pre_narrow_offset_for_reload = function () {
+    if (current_msg_list.selected_id() !== -1) {
+        if (current_msg_list.selected_row().length === 0) {
+            blueslip.debug("narrow.activate missing selected row", {
+                selected_id: current_msg_list.selected_id(),
+                selected_idx: current_msg_list.selected_idx(),
+                selected_idx_exact: current_msg_list._items.indexOf(
+                    current_msg_list.get(current_msg_list.selected_id())),
+                render_start: current_msg_list.view._render_win_start,
+                render_end: current_msg_list.view._render_win_end,
+            });
+        }
+        current_msg_list.pre_narrow_offset = current_msg_list.selected_row().offset().top;
+    }
+};
 
 exports.narrow_title = "home";
 exports.activate = function (raw_operators, opts) {
@@ -71,6 +87,8 @@ exports.activate = function (raw_operators, opts) {
         exports.narrow_title = filter.operands("is")[0];
     } else if (filter.has_operator("pm-with")) {
         exports.narrow_title = "private";
+    } else if (filter.has_operator("group-pm-with")) {
+        exports.narrow_title = "private group";
     }
 
     notifications.redraw_title();
@@ -81,67 +99,61 @@ exports.activate = function (raw_operators, opts) {
                                 previous_id: current_msg_list.selected_id()});
 
     opts = _.defaults({}, opts, {
-        then_select_id: home_msg_list.selected_id(),
-        select_first_unread: false,
-        first_unread_from_server: false,
-        from_reload: false,
+        then_select_id: -1,
+        then_select_offset: undefined,
         change_hash: true,
         trigger: 'unknown',
     });
+
+    // These two narrowing operators specify what message should be
+    // selected and should be the center of the narrow.
     if (filter.has_operator("near")) {
         opts.then_select_id = parseInt(filter.operands("near")[0], 10);
-        opts.select_first_unread = false;
     }
     if (filter.has_operator("id")) {
         opts.then_select_id = parseInt(filter.operands("id")[0], 10);
-        opts.select_first_unread = false;
     }
 
-    if (opts.then_select_id === -1 && !opts.first_unread_from_server) {
-        // According to old comments, this shouldn't happen anymore
-        blueslip.warn("Setting then_select_id to page_params.pointer.");
-        opts.then_select_id = page_params.pointer;
-        opts.select_first_unread = false;
-    }
+    var select_strategy;
 
-    var then_select_id = opts.then_select_id;
-    var then_select_offset;
+    if (opts.then_select_id >= 0) {
+        select_strategy = {
+            flavor: 'exact',
+            msg_id: opts.then_select_id,
+        };
+    } else {
+        select_strategy = {
+            flavor: 'first_unread',
+        };
+    }
 
     if (!was_narrowed_already) {
         unread.messages_read_in_narrow = false;
     }
 
-    if (!opts.select_first_unread && current_msg_list.get_row(then_select_id).length > 0) {
-        then_select_offset = current_msg_list.get_row(then_select_id).offset().top;
+    var then_select_offset;
+
+    if (opts.then_select_offset !== undefined) {
+        then_select_offset = opts.then_select_offset;
+    } else {
+        if (select_strategy.flavor === 'exact') {
+            var row = current_msg_list.get_row(select_strategy.msg_id);
+            if (row.length > 0) {
+                then_select_offset = row.offset().top;
+            }
+        }
     }
 
-    // For legacy reasons, we need to set current_filter before calling
-    // muting_enabled.
+    // IMPORTANT!  At this point we are heavily committed to
+    // populating the new narrow, so we update our narrow_state.
+    // From here on down, any calls to the narrow_state API will
+    // reflect the upcoming narrow.
     narrow_state.set_current_filter(filter);
+
     var muting_enabled = narrow_state.muting_enabled();
 
     // Save how far from the pointer the top of the message list was.
-    if (current_msg_list.selected_id() !== -1) {
-        if (current_msg_list.selected_row().length === 0) {
-            blueslip.debug("narrow.activate missing selected row", {
-                selected_id: current_msg_list.selected_id(),
-                selected_idx: current_msg_list.selected_idx(),
-                selected_idx_exact: current_msg_list._items.indexOf(
-                                        current_msg_list.get(current_msg_list.selected_id())),
-                render_start: current_msg_list.view._render_win_start,
-                render_end: current_msg_list.view._render_win_end,
-            });
-        }
-        current_msg_list.pre_narrow_offset = current_msg_list.selected_row().offset().top;
-    }
-
-    if (opts.first_unread_from_server && opts.from_reload) {
-        then_select_id = page_params.initial_narrow_pointer;
-        then_select_offset = page_params.initial_narrow_offset;
-        opts.first_unread_from_server = false;
-        opts.select_first_unread = false;
-        home_msg_list.pre_narrow_offset = page_params.initial_offset;
-    }
+    exports.save_pre_narrow_offset_for_reload();
 
     var msg_list_opts = {
         collapse_messages: ! narrow_state.get_current_filter().is_search(),
@@ -167,71 +179,56 @@ exports.activate = function (raw_operators, opts) {
     message_list.narrowed = msg_list;
     current_msg_list = message_list.narrowed;
 
-    function maybe_select_closest() {
-        if (! message_list.narrowed.empty()) {
-            if (opts.select_first_unread) {
-                then_select_id = message_list.narrowed.last().id;
-                var first_unread =
-                    _.find(message_list.narrowed.all_messages(), unread.message_unread);
-                if (first_unread) {
-                    then_select_id = first_unread.id;
+    // Populate the message list if we can apply our filter locally (i.e.
+    // with no backend help) and we have the message we want to select.
+    if (narrow_state.get_current_filter().can_apply_locally()) {
+        // We may get back a new select_strategy, or we may get our
+        // original back.
+        select_strategy = exports.maybe_add_local_messages({
+            select_strategy: select_strategy,
+        });
+    }
+
+    var select_immediately = (select_strategy.flavor === 'exact');
+
+    (function fetch_messages() {
+        var anchor;
+        var use_first_unread;
+
+        if (select_strategy.flavor === 'exact') {
+            anchor = select_strategy.msg_id;
+            use_first_unread = false;
+        } else if (select_strategy.flavor === 'first_unread') {
+            anchor = -1;
+            use_first_unread = true;
+        }
+
+        message_fetch.load_messages_for_narrow({
+            then_select_id: anchor,
+            use_first_unread_anchor: use_first_unread,
+            cont: function () {
+                if (!select_immediately) {
+                    exports.update_selection({
+                        select_strategy: {
+                            flavor: 'first_unread',
+                        },
+                        select_offset: then_select_offset,
+                    });
                 }
-            }
+                msg_list.network_time = new Date();
+                maybe_report_narrow_time(msg_list);
+            },
+        });
+    }());
 
-            var preserve_pre_narrowing_screen_position =
-                !opts.select_first_unread &&
-                (message_list.narrowed.get(then_select_id) !== undefined) &&
-                (then_select_offset !== undefined);
-
-            var then_scroll = !preserve_pre_narrowing_screen_position;
-
-            message_list.narrowed.select_id(then_select_id, {then_scroll: then_scroll,
-                                                         use_closest: true,
-                                                         force_rerender: true,
-                                                        });
-
-            if (preserve_pre_narrowing_screen_position) {
-                // Scroll so that the selected message is in the same
-                // position in the viewport as it was prior to
-                // narrowing
-                message_viewport.set_message_offset(then_select_offset);
-            }
-        }
-    }
-
-    // Don't bother populating a message list when it won't contain
-    // the message we want anyway or if the filter can't be applied
-    // locally.
-    if (message_list.all.get(then_select_id) !== undefined) {
-        if (narrow_state.get_current_filter().can_apply_locally()) {
-            message_util.add_messages(message_list.all.all_messages(), message_list.narrowed,
-                                       {delay_render: true});
-        }
-    }
-
-    var defer_selecting_closest = message_list.narrowed.empty();
-    message_fetch.load_old_messages({
-        anchor: then_select_id.toFixed(),
-        num_before: 50,
-        num_after: 50,
-        msg_list: message_list.narrowed,
-        use_first_unread_anchor: opts.first_unread_from_server,
-        cont: function () {
-            ui.hide_loading_more_messages_indicator();
-            if (defer_selecting_closest) {
-                maybe_select_closest();
-            }
-            msg_list.network_time = new Date();
-            maybe_report_narrow_time(msg_list);
-        },
-        cont_will_add_messages: false,
-    });
-
-    if (! defer_selecting_closest) {
-        message_fetch.reset_load_more_status();
-        maybe_select_closest();
+    if (select_immediately) {
+        message_scroll.hide_indicators();
+        exports.update_selection({
+            select_strategy: select_strategy,
+            select_offset: then_select_offset,
+        });
     } else {
-        ui.show_loading_more_messages_indicator();
+        message_scroll.show_loading_older();
     }
 
     // Put the narrow operators in the URL fragment.
@@ -245,17 +242,134 @@ exports.activate = function (raw_operators, opts) {
     $('#search_query').val(Filter.unparse(operators));
     search.update_button_visibility();
 
-    compose_actions.on_narrow();
+    compose_actions.on_narrow(opts);
 
     var current_filter = narrow_state.get_current_filter();
+
+    top_left_corner.handle_narrow_activated(current_filter);
+    stream_list.handle_narrow_activated(current_filter);
+
     $(document).trigger($.Event('narrow_activated.zulip', {msg_list: message_list.narrowed,
-                                                            filter: current_filter,
-                                                            trigger: opts.trigger}));
+                                                           filter: current_filter,
+                                                           trigger: opts.trigger}));
     msg_list.initial_core_time = new Date();
     setTimeout(function () {
         msg_list.initial_free_time = new Date();
         maybe_report_narrow_time(msg_list);
     }, 0);
+};
+
+function load_local_messages() {
+    // This little helper loads messages into our narrow message
+    // list and returns true unless it's empty.  We use this for
+    // cases when our local cache (message_list.all) has at least
+    // one message the user will expect to see in the new narrow.
+    message_util.add_messages(
+        message_list.all.all_messages(),
+        message_list.narrowed,
+        {delay_render: true});
+
+    return !message_list.narrowed.empty();
+}
+
+exports.maybe_add_local_messages = function (opts) {
+    // This function does two very closely related things, both of
+    // which are somewhat optional:
+    //
+    //  - return a new select_strategy for where to advance the cursor
+    //  - add messages into our message list from our local cache
+    var select_strategy = opts.select_strategy;
+
+    if (select_strategy.flavor === 'first_unread') {
+        // Try to upgrade to the "exact" strategy by looking for
+        // unread message ids that match the upcoming narrow.
+        var unread_info = narrow_state.get_first_unread_info();
+
+        if (unread_info.flavor === 'found') {
+            // We found an unread message_id, but we won't return
+            // yet; we'll instead fall through to the next check
+            select_strategy = {
+                flavor: 'exact',
+                msg_id: unread_info.msg_id,
+            };
+        } else if (unread_info.flavor === 'not_found') {
+            // If we didn't find any unread messages, then we
+            // generally want to go the last message in the list,
+            // but only if we've fetched the newest messages
+            // and the narrow's not empty locally.
+            if (message_list.all.fetch_status.has_found_newest()) {
+                // Load messages now and upgrade our strategy
+                // if we find at least one message.
+                if (load_local_messages()) {
+                    var last_msg = message_list.narrowed.last();
+                    select_strategy = {
+                        flavor: 'exact',
+                        msg_id: last_msg.id,
+                    };
+
+                    return select_strategy;
+                }
+            }
+        }
+    }
+
+    // Do not make this an else-if...the block above could have
+    // changed select_strategy.
+    if (select_strategy.flavor === 'exact') {
+        var msg_to_select = message_list.all.get(select_strategy.msg_id);
+        if (msg_to_select !== undefined) {
+            if (load_local_messages()) {
+                return select_strategy;
+            }
+        }
+
+        // Back out to first_unread strategy since we can't find
+        // any messages.
+        select_strategy = {
+            flavor: 'first_unread',
+        };
+        return select_strategy;
+    }
+
+    // We may still be in our original select_strategy.
+    return select_strategy;
+};
+
+exports.update_selection = function (opts) {
+    if (message_list.narrowed.empty()) {
+        return;
+    }
+
+    var select_strategy = opts.select_strategy;
+    var select_offset = opts.select_offset;
+
+    var msg_id;
+
+    if (select_strategy.flavor === 'exact') {
+        msg_id = select_strategy.msg_id;
+    } else if (select_strategy.flavor === 'first_unread') {
+        msg_id = message_list.narrowed.first_unread_message_id();
+    }
+
+    var preserve_pre_narrowing_screen_position =
+        (message_list.narrowed.get(msg_id) !== undefined) &&
+        (select_offset !== undefined);
+
+    var then_scroll = !preserve_pre_narrowing_screen_position;
+
+    message_list.narrowed.select_id(msg_id, {
+        then_scroll: then_scroll,
+        use_closest: true,
+        force_rerender: true,
+    });
+
+    if (preserve_pre_narrowing_screen_position) {
+        // Scroll so that the selected message is in the same
+        // position in the viewport as it was prior to
+        // narrowing
+        message_list.narrowed.view.set_message_offset(select_offset);
+    }
+    unread_ops.process_visible();
 };
 
 exports.stream_topic = function () {
@@ -279,10 +393,51 @@ exports.stream_topic = function () {
     };
 };
 
+exports.activate_stream_for_cycle_hotkey = function (stream_name) {
+    // This is the common code for A/D hotkeys.
+    var filter_expr = [
+        {operator: 'stream', operand: stream_name},
+    ];
+    exports.activate(filter_expr, {});
+};
+
+
+exports.stream_cycle_backward = function () {
+    var curr_stream = narrow_state.stream();
+
+    if (!curr_stream) {
+        return;
+    }
+
+    var stream_name = topic_generator.get_prev_stream(curr_stream);
+
+    if (!stream_name) {
+        return;
+    }
+
+    exports.activate_stream_for_cycle_hotkey(stream_name);
+};
+
+exports.stream_cycle_forward = function () {
+    var curr_stream = narrow_state.stream();
+
+    if (!curr_stream) {
+        return;
+    }
+
+    var stream_name = topic_generator.get_next_stream(curr_stream);
+
+    if (!stream_name) {
+        return;
+    }
+
+    exports.activate_stream_for_cycle_hotkey(stream_name);
+};
+
 exports.narrow_to_next_topic = function () {
     var curr_info = exports.stream_topic();
 
-    if (!curr_info || !curr_info.stream) {
+    if (!curr_info) {
         return;
     }
 
@@ -300,11 +455,33 @@ exports.narrow_to_next_topic = function () {
         {operator: 'topic', operand: next_narrow.topic},
     ];
 
+    exports.activate(filter_expr, {});
+};
+
+exports.narrow_to_next_pm_string = function () {
+
+    var curr_pm = narrow_state.pm_string();
+
+    var next_pm = topic_generator.get_next_unread_pm_string(curr_pm);
+
+    if (!next_pm) {
+        return;
+    }
+
+    // Hopefully someday we can narrow by user_ids_string instead of
+    // mapping back to emails.
+    var pm_with = people.user_ids_string_to_emails_string(next_pm);
+
+    var filter_expr = [
+        {operator: 'pm-with', operand: pm_with},
+    ];
+
+    // force_close parameter is true to not auto open compose_box
     var opts = {
-        select_first_unread: true,
+        force_close: true,
     };
 
-    narrow.activate(filter_expr, opts);
+    exports.activate(filter_expr, opts);
 };
 
 
@@ -323,7 +500,7 @@ exports.by_subject = function (target_id, opts) {
         exports.by_recipient(target_id, opts);
         return;
     }
-    unread_ops.mark_message_as_read(original);
+    unread_ops.notify_server_message_read(original);
     var search_terms = [
         {operator: 'stream', operand: original.stream},
         {operator: 'topic', operand: original.subject},
@@ -337,7 +514,7 @@ exports.by_recipient = function (target_id, opts) {
     opts = _.defaults({}, opts, {then_select_id: target_id});
     // don't use current_msg_list as it won't work for muted messages or for out-of-narrow links
     var message = message_store.get(target_id);
-    unread_ops.mark_message_as_read(message);
+    unread_ops.notify_server_message_read(message);
     switch (message.type) {
     case 'private':
         exports.by('pm-with', message.reply_to, opts);
@@ -361,7 +538,7 @@ exports.deactivate = function () {
     unnarrow_times = {start_time: new Date()};
     blueslip.debug("Unnarrowed");
 
-    if (ui.actively_scrolling()) {
+    if (message_scroll.actively_scrolling()) {
         // There is no way to intercept in-flight scroll events, and they will
         // cause you to end up in the wrong place if you are actively scrolling
         // on an unnarrow. Wait a bit and try again once the scrolling is over.
@@ -381,10 +558,10 @@ exports.deactivate = function () {
     $("#zfilt").removeClass('focused_table');
     $("#zhome").addClass('focused_table');
     current_msg_list = home_msg_list;
-    condense.condense_and_collapse($("#zhome tr.message_row"));
+    condense.condense_and_collapse($("#zhome div.message_row"));
 
     $('#search_query').val('');
-    message_fetch.reset_load_more_status();
+    message_scroll.hide_indicators();
     hashchange.save_narrow();
 
     if (current_msg_list.selected_id() !== -1) {
@@ -402,23 +579,18 @@ exports.deactivate = function () {
         // stream from the home view since leaving it the old selected id might
         // no longer be there
         // Additionally, we pass empty_ok as the user may have removed **all** streams
-        // from her home view
+        // from their home view
         if (unread.messages_read_in_narrow) {
             // We read some unread messages in a narrow. Instead of going back to
             // where we were before the narrow, go to our first unread message (or
             // the bottom of the feed, if there are no unread messages).
-            var first_unread = _.find(current_msg_list.all_messages(), unread.message_unread);
-            if (first_unread) {
-                message_id_to_select = first_unread.id;
-            } else {
-                message_id_to_select = current_msg_list.last().id;
-            }
+            message_id_to_select = current_msg_list.first_unread_message_id();
         } else {
             // We narrowed, but only backwards in time (ie no unread were read). Try
             // to go back to exactly where we were before narrowing.
             if (preserve_pre_narrowing_screen_position) {
                 // We scroll the user back to exactly the offset from the selected
-                // message that he was at the time that he narrowed.
+                // message that they were at the time that they narrowed.
                 // TODO: Make this correctly handle the case of resizing while narrowed.
                 select_opts.target_scroll_offset = current_msg_list.pre_narrow_offset;
             }
@@ -428,6 +600,9 @@ exports.deactivate = function () {
     }
 
     compose_fade.update_message_list();
+
+    top_left_corner.handle_narrow_deactivated();
+    stream_list.handle_narrow_deactivated();
 
     $(document).trigger($.Event('narrow_deactivated.zulip', {msg_list: current_msg_list}));
 
@@ -442,11 +617,11 @@ exports.deactivate = function () {
 };
 
 exports.restore_home_state = function () {
-    // If we click on the Home link while already at Home, unnarrow.
-    // If we click on the Home link from another nav pane, just go
+    // If we click on the All Messages link while already at All Messages, unnarrow.
+    // If we click on the All Messages link from another nav pane, just go
     // back to the state you were in (possibly still narrowed) before
-    // you left the Home pane.
-    if (!modals.is_active()) {
+    // you left the All Messages pane.
+    if (!overlays.is_active()) {
         exports.deactivate();
     }
     navigate.maybe_scroll_to_selected();
@@ -478,10 +653,15 @@ function pick_empty_narrow_banner() {
         } else if (first_operand === "private") {
             // You have no private messages.
             return $("#empty_narrow_all_private_message");
+        } else if (first_operand === "unread") {
+            // You have no unread messages.
+            return $("#no_unread_narrow_message");
         }
     } else if ((first_operator === "stream") && !stream_data.is_subscribed(first_operand)) {
-        // You are narrowed to a stream to which you aren't subscribed.
-        if (!stream_data.get_sub(narrow_state.stream())) {
+        // You are narrowed to a stream which does not exist or is a private stream
+        // in which you were never subscribed.
+        var stream_sub = stream_data.get_sub(narrow_state.stream());
+        if (!stream_sub || stream_sub.invite_only) {
             return $("#nonsubbed_private_nonexistent_stream_narrow_message");
         }
         return $("#nonsubbed_stream_narrow_message");
@@ -499,6 +679,8 @@ function pick_empty_narrow_banner() {
             return $("#silent_user");
         }
         return $("#non_existing_user");
+    } else if (first_operator === "group-pm-with") {
+        return $("#empty_narrow_group_private_message");
     }
     return default_banner;
 }
@@ -533,11 +715,11 @@ exports.by_sender_uri = function (reply_to) {
 };
 
 exports.by_stream_uri = function (stream) {
-    return "#narrow/stream/" + hash_util.encodeHashComponent(stream);
+    return "#narrow/stream/" + hash_util.encode_stream_name(stream);
 };
 
 exports.by_stream_subject_uri = function (stream, subject) {
-    return "#narrow/stream/" + hash_util.encodeHashComponent(stream) +
+    return "#narrow/stream/" + hash_util.encode_stream_name(stream) +
            "/subject/" + hash_util.encodeHashComponent(subject);
 };
 
@@ -557,12 +739,18 @@ exports.by_conversation_and_time_uri = function (message, is_absolute_url) {
     }
     if (message.type === "stream") {
         return absolute_url + "#narrow/stream/" +
-            hash_util.encodeHashComponent(message.stream) +
+            hash_util.encode_stream_name(message.stream) +
             "/subject/" + hash_util.encodeHashComponent(message.subject) +
             "/near/" + hash_util.encodeHashComponent(message.id);
     }
+
+    // Include your own email in this URI if it's not there already
+    var all_emails = message.reply_to;
+    if (all_emails.indexOf(people.my_current_email()) === -1) {
+        all_emails += "," + people.my_current_email();
+    }
     return absolute_url + "#narrow/pm-with/" +
-        hash_util.encodeHashComponent(message.reply_to) +
+        hash_util.encodeHashComponent(all_emails) +
         "/near/" + hash_util.encodeHashComponent(message.id);
 };
 

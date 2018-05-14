@@ -58,10 +58,15 @@ exports.update_unread_counts = function () {
     // This updates some DOM elements directly, so try to
     // avoid excessive calls to this.
     activity.update_dom_with_unread_counts(res);
+    top_left_corner.update_dom_with_unread_counts(res);
     stream_list.update_dom_with_unread_counts(res);
     pm_list.update_dom_with_unread_counts(res);
     notifications.update_title_count(res.home_unread_messages);
     notifications.update_pm_count(res.private_message_count);
+
+    exports.set_count_toggle_button($("#streamlist-toggle-unreadcount"),
+                                    res.home_unread_messages);
+
 };
 
 exports.enable = function enable() {
@@ -82,18 +87,18 @@ function consider_bankruptcy() {
     }
 
     var now = new XDate(true).getTime() / 1000;
-    if ((page_params.unread_count > 500) &&
-        (now - page_params.furthest_read_time > 60 * 60 * 24 * 2)) { // 2 days.
-        var unread_info = templates.render('bankruptcy_modal',
-                                           {unread_count: page_params.unread_count});
-        $('#bankruptcy-unread-count').html(unread_info);
+    if ((page_params.unread_msgs.count > 500) &&
+            (now - page_params.furthest_read_time > 60 * 60 * 24 * 2)) { // 2 days.
+        var rendered_modal = templates.render('bankruptcy_modal', {
+            unread_count: page_params.unread_msgs.count});
+        $('#bankruptcy-unread-count').html(rendered_modal);
         $('#bankruptcy').modal('show');
     } else {
         exports.enable();
     }
 }
 
-exports.initialize = function initialize() {
+function _initialize() {
     // No matter how the bankruptcy modal is closed, show unread counts after.
     $("#bankruptcy").on("hide", function () {
         unread_ui.enable();
@@ -104,12 +109,15 @@ exports.initialize = function initialize() {
         $("#yes-bankrupt").hide();
         $("#no-bankrupt").hide();
         $(this).after($("<div>").addClass("alert alert-info settings_committed")
-                      .text(i18n.t("Bringing you to your latest messages…")));
+            .text(i18n.t("Bringing you to your latest messages…")));
     });
 
     consider_bankruptcy();
-};
+}
 
+exports.initialize = function () {
+    i18n.ensure_i18n(_initialize);
+};
 
 return exports;
 }());

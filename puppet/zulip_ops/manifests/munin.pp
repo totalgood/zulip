@@ -9,6 +9,7 @@ class zulip_ops::munin {
                      ]
   package { $munin_packages: ensure => "installed" }
 
+  $hosts_domain = zulipconf("nagios", "hosts_domain", undef)
   $hosts = $zulip_ops::base::hosts
 
   file { "/etc/munin":
@@ -16,23 +17,23 @@ class zulip_ops::munin {
     recurse => true,
     owner => "root",
     group => "root",
-    mode => 644,
+    mode => '0644',
     source => "puppet:///modules/zulip_ops/munin"
   }
 
   file { "/etc/munin/munin.conf":
-    require => [ Package["munin"], File["/etc/munin"] ],
     ensure => file,
+    require => [ Package["munin"], File["/etc/munin"] ],
     owner => "root",
     group => "root",
-    mode => 644,
+    mode => '0644',
     content => template("zulip_ops/munin/munin.conf.erb")
   }
 
   file { "/etc/supervisor/conf.d/munin_tunnels.conf":
-    require => Package["supervisor", "autossh"],
     ensure => file,
-    mode   => 644,
+    require => Package["supervisor", "autossh"],
+    mode   => '0644',
     owner  => "root",
     group  => "root",
     content => template("zulip_ops/supervisor/conf.d/munin_tunnels.conf.erb"),

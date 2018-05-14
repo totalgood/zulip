@@ -1,11 +1,10 @@
 # Manage your uploaded files
 
-{!follow-steps.md!} view and manage the uploaded files to your organization.
+Follow the following steps to view and manage the uploaded files to your organization.
 
 ## View your uploaded files
 
-To view your uploaded files, go to the [Uploaded files](/#settings/uploaded-files)
-{!settings.md!}
+{settings_tab|uploaded-files}
 
 All of your uploaded files are displayed in the following format:
 
@@ -42,8 +41,7 @@ You can delete any of your uploaded files from your organization; however, doing
 so may confuse some of the other users in your organization since they can no
 longer view the file, so please be careful!
 
-{!go-to-the.md!} [Uploaded files](/#settings/uploaded-files)
-{!settings.md!}
+{settings_tab|uploaded-files}
 
 2. Locate the file you want to delete in the **Uploaded files** section; the
 files are sorted by the time they were uploaded, oldest to newest.

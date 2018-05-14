@@ -19,12 +19,14 @@ casper.then(function () {
 });
 
 common.then_send_message('stream', {
-        stream:  'Verona',
-        subject: 'stars',
-        content: 'test star',
+    stream:  'Verona',
+    subject: 'stars',
+    content: 'test star',
 });
 
-casper.waitForText("test star");
+casper.then(function () {
+    casper.waitForSelectorText("#zhome .message_row", "test star");
+});
 
 casper.then(function () {
     casper.test.info("Checking star counts");
@@ -35,10 +37,15 @@ casper.then(function () {
 
     // Clicking on a message star stars it.
     toggle_last_star();
-    casper.test.assertEquals(star_count(), 1,
-                             "Got expected single star count.");
+});
 
-    casper.click('a[href^="#narrow/is/starred"]');
+casper.then(function () {
+    casper.waitUntilVisible('#zhome .icon-vector-star', function () {
+        casper.test.assertEquals(star_count(), 1,
+                                 "Got expected single star count.");
+
+        casper.click('a[href^="#narrow/is/starred"]');
+    });
 });
 
 casper.waitUntilVisible('#zfilt', function () {

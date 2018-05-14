@@ -1,18 +1,14 @@
-var assert = require('assert');
-
-add_dependencies({
-    util: 'js/util.js',
-    tutorial: 'js/tutorial.js',
-});
-
 var noop = function () {};
 
 set_global('document', {});
 set_global('window', {
     addEventListener: noop,
 });
-
 global.stub_out_jquery();
+
+zrequire('message_store');
+zrequire('server_events_dispatch');
+zrequire('server_events');
 
 set_global('blueslip', {});
 set_global('channel', {});
@@ -25,6 +21,9 @@ set_global('reload', {
     is_in_progress: function () {return false;},
 });
 
+// we also directly write to pointer
+set_global('pointer', {});
+
 set_global('echo', {
     process_from_server: function (messages) {
         return messages;
@@ -36,7 +35,43 @@ set_global('ui_report', {
     show_error: function () { return false; },
 });
 
-var server_events = require('js/server_events.js');
+
+server_events.home_view_loaded();
+
+(function test_message_event() {
+    var event = {
+        type: 'message',
+        message: {
+            content: 'hello',
+        },
+        flags: [],
+    };
+
+    var inserted;
+    set_global('message_events', {
+        insert_new_messages: function (messages) {
+            assert.equal(messages[0].content, event.message.content);
+            inserted = true;
+        },
+    });
+
+    server_events._get_events_success([event]);
+    assert(inserted);
+}());
+
+(function test_pointer_event() {
+    var event = {
+        type: 'pointer',
+        pointer: 999,
+    };
+
+    global.pointer.furthest_read = 0;
+    global.pointer.server_furthest_read = 0;
+    server_events._get_events_success([event]);
+    assert.equal(global.pointer.furthest_read, event.pointer);
+    assert.equal(global.pointer.server_furthest_read, event.pointer);
+}());
+
 
 // Start blueslip tests here
 

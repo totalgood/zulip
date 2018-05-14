@@ -5,9 +5,9 @@ through your operating system.
 
 ## Change keyboard language on Linux
 
-{!go-to-the.md!} **System Settings** via the application launcher.
+1. Go to the **System Settings** via the application launcher.
 
-{!go-to-the.md!} **Text Entry** page.
+1. Go to the **Text Entry** page.
 
 3. Add a language by clicking on the plus
 (<i class="icon-vector-plus"></i>) icon.
@@ -28,7 +28,7 @@ This sets your current keyboard language to the selected language.
 
 2. Type "intl.cpl" in the **Start Search** box, and then press **ENTER**.
 
-{!go-to-the.md!} the **Keyboards and Language** tab.
+1. Go to the the **Keyboards and Language** tab.
 
 4. Click **Change keyboards** and then click **Add**.
 
@@ -54,7 +54,7 @@ and then click **OK**.
     pointer over this bar, a tooltip appears that describes the active
     keyboard layout.
 
-## Change keyboard language on MacOS
+## Change keyboard language on macOS
 
 1. Choose **Apple menu**.
 

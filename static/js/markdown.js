@@ -1,5 +1,5 @@
 // This contains zulip's frontend markdown implementation; see
-// docs/markdown.md for docs on our Markdown syntax.  The other
+// docs/subsystems/markdown.md for docs on our Markdown syntax.  The other
 // main piece in rendering markdown client-side is
 // static/third/marked/lib/marked.js, which we have significantly
 // modified from the original implementation.
@@ -11,38 +11,50 @@ var exports = {};
 var realm_filter_map = {};
 var realm_filter_list = [];
 
+
+// Helper function
+function escape(html, encode) {
+    return html
+        .replace(!encode ? /&(?!#?\w+;)/g : /&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Regexes that match some of our common bugdown markup
-var bugdown_re = [
+var backend_only_markdown_re = [
     // Inline image previews, check for contiguous chars ending in image suffix
     // To keep the below regexes simple, split them out for the end-of-message case
 
-    /[^\s]*(?:\.bmp|\.gif|\.jpg|\.jpeg|\.png|\.webp)\s+/m,
-    /[^\s]*(?:\.bmp|\.gif|\.jpg|\.jpeg|\.png|\.webp)$/m,
+    /[^\s]*(?:(?:\.bmp|\.gif|\.jpg|\.jpeg|\.png|\.webp)\)?)\s+/m,
+    /[^\s]*(?:(?:\.bmp|\.gif|\.jpg|\.jpeg|\.png|\.webp)\)?)$/m,
 
     // Twitter and youtube links are given previews
 
     /[^\s]*(?:twitter|youtube).com\/[^\s]*/,
 ];
 
-exports.contains_bugdown = function (content) {
+exports.contains_backend_only_syntax = function (content) {
     // Try to guess whether or not a message has bugdown in it
     // If it doesn't, we can immediately render it client-side
-    var markedup = _.find(bugdown_re, function (re) {
+    var markedup = _.find(backend_only_markdown_re, function (re) {
         return re.test(content);
     });
-    return markedup !== undefined;
+
+    // If a realm filter doesn't start with some specified characters
+    // then don't render it locally. It is workaround for the fact that
+    // javascript regex doesn't support lookbehind.
+    var false_filter_match = _.find(realm_filter_list, function (re) {
+        var pattern = /(?:[^\s'"\(,:<])/.source + re[0].source + /(?![\w])/.source;
+        var regex = new RegExp(pattern);
+        return regex.test(content);
+    });
+    return markedup !== undefined || false_filter_match !== undefined;
 };
 
-function push_uniquely(lst, elem) {
-    if (!_.contains(lst, elem)) {
-        lst.push(elem);
-    }
-}
-
 exports.apply_markdown = function (message) {
-    if (message.flags === undefined) {
-        message.flags = [];
-    }
+    message_store.init_booleans(message);
 
     // Our python-markdown processor appends two \n\n to input
     var options = {
@@ -50,31 +62,35 @@ exports.apply_markdown = function (message) {
             var person = people.get_by_name(name);
             if (person !== undefined) {
                 if (people.is_my_user_id(person.user_id)) {
-                    push_uniquely(message.flags, 'mentioned');
+                    message.mentioned = true;
+                    message.mentioned_me_directly = true;
                 }
                 return '<span class="user-mention" data-user-id="' + person.user_id + '">' +
-                       '@' + person.full_name +
+                       '@' + escape(person.full_name, true) +
                        '</span>';
-            } else if (name === 'all' || name === 'everyone') {
-                push_uniquely(message.flags, 'mentioned');
+            } else if (name === 'all' || name === 'everyone' || name === 'stream') {
+                message.mentioned = true;
                 return '<span class="user-mention" data-user-id="*">' +
                        '@' + name +
                        '</span>';
             }
-            return undefined;
+            return;
+        },
+        groupMentionHandler: function (name) {
+            var group = user_groups.get_user_group_from_name(name);
+            if (group !== undefined) {
+                if (user_groups.is_member_of(group.id, people.my_current_user_id())) {
+                    message.mentioned = true;
+                }
+                return '<span class="user-group-mention" data-user-group-id="' + group.id + '">' +
+                       '@' + escape(group.name, true) +
+                       '</span>';
+            }
+            return;
         },
     };
     message.content = marked(message.raw_content + '\n\n', options).trim();
-};
-
-exports.add_message_flags = function (message) {
-    // Note: mention flags are set in apply_markdown()
-
-    if (message.raw_content.indexOf('/me ') === 0 &&
-        message.content.indexOf('<p>') === 0 &&
-        message.content.lastIndexOf('</p>') === message.content.length - 4) {
-        message.flags.push('is_me_message');
-    }
+    message.is_me_message = exports.is_status_message(message.raw_content, message.content);
 };
 
 exports.add_subject_links = function (message) {
@@ -105,41 +121,41 @@ exports.add_subject_links = function (message) {
     message.subject_links = links;
 };
 
-function escape(html, encode) {
-  return html
-    .replace(!encode ? /&(?!#?\w+;)/g : /&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+exports.is_status_message = function (raw_content, content) {
+    return (raw_content.indexOf('/me ') === 0 &&
+            raw_content.indexOf('\n') === -1 &&
+            content.indexOf('<p>') === 0 &&
+            content.lastIndexOf('</p>') === content.length - 4);
+};
 
 function handleUnicodeEmoji(unicode_emoji) {
-    var hex_value = unicode_emoji.codePointAt(0).toString(16);
-    if (emoji.emojis_by_unicode.hasOwnProperty(hex_value)) {
-        var emoji_url = emoji.emojis_by_unicode[hex_value];
-        return '<img alt="' + unicode_emoji + '"' +
-               ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + unicode_emoji + '">';
+    var codepoint = unicode_emoji.codePointAt(0).toString(16);
+    if (emoji_codes.codepoint_to_name.hasOwnProperty(codepoint)) {
+        var emoji_name = emoji_codes.codepoint_to_name[codepoint];
+        var alt_text = ':' + emoji_name + ':';
+        var title = emoji_name.split("_").join(" ");
+        return '<span class="emoji emoji-' + codepoint + '"' +
+               ' title="' + title + '">' + alt_text +
+               '</span>';
     }
     return unicode_emoji;
 }
 
 function handleEmoji(emoji_name) {
-    var input_emoji = ':' + emoji_name + ":";
-    var emoji_url;
-    if (emoji.realm_emojis.hasOwnProperty(emoji_name)) {
-        emoji_url = emoji.realm_emojis[emoji_name].emoji_url;
-        return '<img alt="' + input_emoji + '"' +
+    var alt_text = ':' + emoji_name + ':';
+    var title = emoji_name.split("_").join(" ");
+    if (emoji.active_realm_emojis.hasOwnProperty(emoji_name)) {
+        var emoji_url = emoji.active_realm_emojis[emoji_name].emoji_url;
+        return '<img alt="' + alt_text + '"' +
                ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + input_emoji + '">';
-    } else if (emoji.emojis_by_name.hasOwnProperty(emoji_name)) {
-        emoji_url = emoji.emojis_by_name[emoji_name];
-        return '<img alt="' + input_emoji + '"' +
-               ' class="emoji" src="' + emoji_url + '"' +
-               ' title="' + input_emoji + '">';
+               ' title="' + title + '">';
+    } else if (emoji_codes.name_to_codepoint.hasOwnProperty(emoji_name)) {
+        var codepoint = emoji_codes.name_to_codepoint[emoji_name];
+        return '<span class="emoji emoji-' + codepoint + '"' +
+               ' title="' + title + '">' + alt_text +
+               '</span>';
     }
-    return input_emoji;
+    return alt_text;
 }
 
 function handleAvatar(email) {
@@ -151,12 +167,12 @@ function handleAvatar(email) {
 function handleStream(streamName) {
     var stream = stream_data.get_sub(streamName);
     if (stream === undefined) {
-        return undefined;
+        return;
     }
+    var href = window.location.origin + '/#narrow/stream/' + hash_util.encode_stream_name(stream.name);
     return '<a class="stream" data-stream-id="' + stream.stream_id + '" ' +
-        'href="' + window.location.origin + '/#narrow/stream/' +
-        hash_util.encodeHashComponent(stream.name) + '"' +
-        '>' + '#' + stream.name + '</a>';
+        'href="' + href + '"' +
+        '>' + '#' + escape(stream.name) + '</a>';
 
 }
 
@@ -177,7 +193,7 @@ function handleTex(tex, fullmatch) {
     try {
         return katex.renderToString(tex);
     } catch (ex) {
-        if (ex.message.startsWith('KaTeX parse error')) { // TeX syntax error
+        if (ex.message.indexOf('KaTeX parse error') === 0) { // TeX syntax error
             return '<span class="tex-error">' + escape(fullmatch) + '</span>';
         }
         blueslip.error(ex);
@@ -217,6 +233,15 @@ function python_to_js_filter(pattern, url) {
         });
         pattern = pattern.replace(inline_flag_re, "");
     }
+    // Ideally we should have been checking that realm filters
+    // begin with certain characters but since there is no
+    // support for negative lookbehind in javascript, we check
+    // for this condition in `contains_backend_only_syntax()`
+    // function. If the condition is satisfied then the message
+    // is rendered locally, otherwise, we return false there and
+    // message is rendered on the backend which has proper support
+    // for negative lookbehind.
+    pattern = pattern + /(?![\w])/.source;
     return [new RegExp(pattern, js_flags), url];
 }
 
@@ -239,13 +264,71 @@ exports.set_realm_filters = function (realm_filters) {
     marked.InlineLexer.rules.zulip.realm_filters = marked_rules;
 };
 
+var preprocess_auto_olists = (function () {
+    var TAB_LENGTH = 2;
+    var re = /^( *)(\d+)\. +(.*)/;
+
+    function getIndent(match) {
+        return Math.floor(match[1].length / TAB_LENGTH);
+    }
+
+    function extendArray(arr, arr2) {
+        Array.prototype.push.apply(arr, arr2);
+    }
+
+    function renumber(mlist) {
+        if (!mlist.length) {
+            return [];
+        }
+
+        var startNumber = parseInt(mlist[0][2], 10);
+        var changeNumbers = _.every(mlist, function (m) {
+            return startNumber === parseInt(m[2], 10);
+        });
+
+        var counter = startNumber;
+        return _.map(mlist, function (m) {
+            var number = changeNumbers ? counter.toString() : m[2];
+            counter += 1;
+            return m[1] + number + '. ' + m[3];
+        });
+    }
+
+    return function (src) {
+        var newLines = [];
+        var currentList = [];
+        var currentIndent = 0;
+
+        _.each(src.split('\n'), function (line) {
+            var m = line.match(re);
+            var isNextItem = m && currentList.length && currentIndent === getIndent(m);
+            if (!isNextItem) {
+                extendArray(newLines, renumber(currentList));
+                currentList = [];
+            }
+
+            if (!m) {
+                newLines.push(line);
+            } else if (isNextItem) {
+                currentList.push(m);
+            } else {
+                currentList = [m];
+                currentIndent = getIndent(m);
+            }
+        });
+
+        extendArray(newLines, renumber(currentList));
+
+        return newLines.join('\n');
+    };
+}());
+
 exports.initialize = function () {
 
     function disable_markdown_regex(rules, name) {
         rules[name] = {exec: function () {
-                return false;
-            },
-        };
+            return false;
+        }};
     }
 
     // Configure the marked markdown parser for our usage
@@ -276,6 +359,16 @@ exports.initialize = function () {
         return fenced_code.process_fenced_code(src);
     }
 
+    function preprocess_translate_emoticons(src) {
+        if (!page_params.translate_emoticons) {
+            return src;
+        }
+
+        // In this scenario, the message has to be from the user, so the only
+        // requirement should be that they have the setting on.
+        return emoji.translate_emoticons_to_names(src);
+    }
+
     // Disable ordered lists
     // We used GFM + tables, so replace the list start regex for that ruleset
     // We remove the |[\d+]\. that matches the numbering in a numbered list
@@ -293,7 +386,7 @@ exports.initialize = function () {
 
     // Disable _emphasis_ (keeping *emphasis*)
     // Text inside ** must start and end with a word character
-    // it need for things like "const char *x = (char *)y"
+    // to prevent mis-parsing things like "char **x = (char **)y"
     marked.InlineLexer.rules.zulip.em = /^\*(?!\s+)((?:\*\*|[\s\S])+?)((?:[\S]))\*(?!\*)/;
 
     // Disable autolink as (a) it is not used in our backend and (b) it interferes with @mentions
@@ -324,7 +417,11 @@ exports.initialize = function () {
         realmFilterHandler: handleRealmFilter,
         texHandler: handleTex,
         renderer: r,
-        preprocessors: [preprocess_code_blocks],
+        preprocessors: [
+            preprocess_code_blocks,
+            preprocess_auto_olists,
+            preprocess_translate_emoticons,
+        ],
     });
 
 };

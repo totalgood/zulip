@@ -4,6 +4,8 @@ var exports = {};
 // This module handles the outbound side of typing indicators.
 // We detect changes in the compose box and notify the server
 // when we are typing.  For the inbound side see typing_events.js.
+//
+// See docs/subsystems/typing-indicators.md for details on typing indicators.
 
 function send_typing_notification_ajax(recipients, operation) {
     channel.post({
@@ -22,7 +24,7 @@ function send_typing_notification_ajax(recipients, operation) {
 function get_recipient() {
     var compose_recipient = compose_state.recipient();
     if (compose_recipient === "") {
-        return undefined;
+        return;
     }
     return compose_recipient;
 }
@@ -71,25 +73,27 @@ function notify_server_stop(recipients) {
     send_typing_notification_ajax(recipients, "stop");
 }
 
-var worker = {
-    get_recipient: get_recipient,
-    is_valid_conversation: is_valid_conversation,
-    get_current_time: get_current_time,
-    notify_server_start: notify_server_start,
-    notify_server_stop: notify_server_stop,
+exports.initialize = function () {
+    var worker = {
+        get_recipient: get_recipient,
+        is_valid_conversation: is_valid_conversation,
+        get_current_time: get_current_time,
+        notify_server_start: notify_server_start,
+        notify_server_stop: notify_server_stop,
+    };
+
+    $(document).on('input', '#compose-textarea', function () {
+        // If our previous state was no typing notification, send a
+        // start-typing notice immediately.
+        typing_status.handle_text_input(worker);
+    });
+
+    // We send a stop-typing notification immediately when compose is
+    // closed/cancelled
+    $(document).on('compose_canceled.zulip compose_finished.zulip', function () {
+        typing_status.stop(worker);
+    });
 };
-
-$(document).on('input', '#new_message_content', function () {
-    // If our previous state was no typing notification, send a
-    // start-typing notice immediately.
-    typing_status.handle_text_input(worker);
-});
-
-// We send a stop-typing notification immediately when compose is
-// closed/cancelled
-$(document).on('compose_canceled.zulip compose_finished.zulip', function () {
-    typing_status.stop(worker);
-});
 
 return exports;
 }());

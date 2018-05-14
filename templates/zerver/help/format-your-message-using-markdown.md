@@ -9,7 +9,7 @@ Zulip uses a variant of
 To see a summary of message formatting in Zulip, click the A (<i
 class="icon-vector-font"></i>) icon located in the bottom left corner of
 your messaging box. You can alternatively click the cog (<i
-class="icon-vector-cog"></i>) icon in the upper right corner of the right
+class="icon-vector-cog"></i>) icon in the top right corner of the right
 sidebar and choose **Message formatting** from the dropdown menu that
 appears.
 
@@ -74,6 +74,12 @@ to include lists in your messages.
 !!! tip ""
     You can add nested bullets within lists by adding two spaces before each
     nested bullet.
+
+Numbered lists in which each item begins with the same number will
+have the numbers automatically edited to increment (e.g. if every line
+starts with `3.`, it'll go 3, 4, 5, ...).
+
+![Numbered lists](/static/images/help/numbered-lists-screenshot.png)
 
 ## Emojis
 

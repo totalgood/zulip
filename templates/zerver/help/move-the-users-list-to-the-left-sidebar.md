@@ -9,9 +9,8 @@ the left side of the screen under the **Streams** section in the left sidebar.
 You can easily change the location of the **Users** list by following a few
 steps.
 
-{!go-to-the.md!} [Display settings](/#settings/display-settings)
-{!settings.md!}
+{settings_tab|display-settings}
 
 2. Select the option labeled
-    **Display user list on left side in narrow windows**, then reload the page
+    **User list on left sidebar in narrow windows**, then reload the page
     in order for the change to take effect.

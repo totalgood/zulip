@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
-from __future__ import unicode_literals
-
+import django.db.models.deletion
 from django.db import migrations, models
-
 
 class Migration(migrations.Migration):
 
@@ -36,6 +34,6 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='remotepushdevicetoken',
             name='server',
-            field=models.ForeignKey(to='zilencer.RemoteZulipServer'),
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='zilencer.RemoteZulipServer'),
         ),
     ]

@@ -1,0 +1,277 @@
+.popover {
+    width: auto;
+}
+
+.popover-content {
+    padding: 5px 0px;
+}
+
+.popover-title {
+    overflow-x: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+
+    font-size: inherit;
+    line-height: inherit;
+}
+
+.popover-title:empty {
+    display: none;
+}
+
+.popover_info {
+    text-align: center;
+}
+
+.popover hr {
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+.popover-left,
+.popover-right {
+    max-width: 200px;
+}
+
+.streams_popover .sp-container {
+    background: hsl(0, 0%, 100%);
+    cursor: pointer;
+    border: none;
+}
+
+.sp-container {
+    z-index: 100;
+}
+
+.colorpicker-container .sp-container input {
+    -webkit-box-sizing: initial;
+    -moz-box-sizing: inherit;
+    -ms-box-sizing: inherit;
+    box-sizing: initial;
+
+    width: calc(100% - 13px);
+}
+
+.streams_popover .sp-palette-container {
+    border-right: none;
+}
+
+.streams_popover .colorpicker-container {
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.streams_popover .popover_sub_unsub_button {
+    margin-top: 0px;
+    float: none;
+}
+
+ul.info_popover_actions i {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    margin-right: 3px;
+}
+
+ul.actions_popover i {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    margin-right: 3px;
+}
+
+ul.remind_me_popover .remind_icon {
+    text-align: center;
+}
+
+.user_popover {
+    width: 240px;
+    top: 100px!important;
+
+    margin: -14px;
+    padding: 0;
+}
+
+.message-info-popover {
+    width: 240px;
+}
+
+.group-info-popover .group-info {
+    text-align: center;
+}
+
+.group-info-popover .group-info .group-name {
+    font-weight: bold;
+}
+
+.group-info-popover .member-list {
+    position: relative;
+    max-height: 300px;
+    overflow-y: auto;
+    list-style: none;
+    margin-left: 0;
+}
+
+.group-info-popover .member-list .bot {
+    color: hsl(180, 5%, 74%);
+    vertical-align: top;
+    width: 20px;
+    padding-top: 3.5px;
+    text-align: center;
+}
+
+.user_popover .popover-title {
+    padding: 0;
+}
+
+.user_popover .popover_info li {
+    word-wrap: break-word;
+}
+
+.message-info-popover .popover-title,
+.user_popover .popover-title {
+    border-color: hsla(0, 0%, 0%, 0.2);
+}
+
+.popover-avatar .popover-inner {
+    width: 240px;
+}
+
+.popover-avatar {
+    height: 240px;
+    width: 240px;
+    background-size: cover;
+    background-position: center;
+    position: relative;
+}
+
+.user-profile-modal-avatar {
+    height: 90px;
+    width: 90px;
+    background-size: cover;
+    background-position: center;
+    border-radius: 5px;
+}
+
+.user-profile-modal-name-section {
+    font-size: 26px;
+    font-weight: 700;
+    position: relative;
+    top: -75px;
+    left: 100px;
+    max-width: 70%;
+}
+
+.user-profile-modal-email-section {
+    font-size: 15px;
+    font-weight: 500;
+    position: relative;
+    top: -70px;
+    left: 100px;
+    max-width: 80%;
+}
+
+.user-profile-modal-field-name {
+    margin-bottom: -2px;
+    font-weight: bold;
+    max-width: 95%;
+}
+
+.user-profile-modal-field-value {
+    font-size: 15px;
+    margin-bottom: 5px;
+    max-width: 95%;
+}
+
+#user-profile-modal-hr {
+    margin-top: -15px;
+}
+
+#user-profile-modal-body {
+    padding-bottom: 10px;
+    padding-top: 10px;
+    margin-bottom: 10px;
+    margin-top: 10px;
+}
+
+.user-profile-modal-edit-button {
+    color: black;
+    font-size: 18px;
+}
+
+.message-info-popover {
+    padding: 0;
+}
+
+.message-info-popover .popover-title {
+    padding: 0;
+}
+
+@media (max-width: 768px) {
+    .message-info-popover {
+        display: flex !important;
+        justify-content: center;
+        align-items: center;
+
+        /* these are to override JS embedded inline styles. */
+        top: 0px !important;
+        left: 0px !important;
+        margin: 0 !important;
+        width: 100vw;
+        height: 100vh;
+
+        background-color: hsla(0, 0%, 0%, 0.7);
+        border-radius: 0px;
+        border: none;
+
+        pointer-events: none;
+    }
+
+    .message-info-popover .popover-inner {
+        background-color: #fff;
+        pointer-events: all;
+    }
+
+    .popover-flex {
+        position: absolute;
+        top: 0 !important;
+        left: 0 !important;
+
+        width: 100vw;
+        height: 100vh;
+
+        display: flex !important;
+        justify-content: center;
+        align-items: center;
+
+        background-color: rgba(0, 0, 0, 0.7);
+
+        z-index: 103;
+
+        opacity: 0;
+        pointer-events: none;
+
+        transition: all 0.3s ease;
+    }
+
+    .popover-flex.fade.in {
+        opacity: 1;
+        pointer-events: all;
+    }
+
+    .popover-flex .popover {
+        display: inline-block;
+    }
+
+    .emoji-info-popover {
+        position: static;
+        margin-right: 0;
+    }
+}
+
+.popover_user_presence {
+    display: inline-block;
+    float: initial;
+    position: relative;
+    top: 1px;
+}

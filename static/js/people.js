@@ -5,7 +5,7 @@ var exports = {};
 var people_dict;
 var people_by_name_dict;
 var people_by_user_id_dict;
-var realm_people_dict;
+var active_user_dict;
 var cross_realm_dict;
 var pm_recipient_count_dict;
 var my_user_id;
@@ -21,7 +21,10 @@ exports.init = function () {
     people_by_name_dict = new Dict({fold_case: true});
     people_by_user_id_dict = new Dict();
 
-    realm_people_dict = new Dict();
+    // The next dictionary includes all active users (human/user)
+    // in our realm, but it excludes non-active users and
+    // cross-realm bots.
+    active_user_dict = new Dict();
     cross_realm_dict = new Dict(); // keyed by user_id
     pm_recipient_count_dict = new Dict();
 };
@@ -32,7 +35,7 @@ exports.init();
 exports.get_person_from_user_id = function (user_id) {
     if (!people_by_user_id_dict.has(user_id)) {
         blueslip.error('Unknown user_id in get_person_from_user_id: ' + user_id);
-        return undefined;
+        return;
     }
     return people_by_user_id_dict.get(user_id);
 };
@@ -41,7 +44,7 @@ exports.get_by_email = function (email) {
     var person = people_dict.get(email);
 
     if (!person) {
-        return undefined;
+        return;
     }
 
     if (person.email.toLowerCase() !== email.toLowerCase()) {
@@ -57,7 +60,7 @@ exports.get_by_email = function (email) {
 exports.get_realm_count = function () {
     // This returns the number of active people in our realm.  It should
     // exclude bots and deactivated users.
-    return realm_people_dict.num_items();
+    return active_user_dict.num_items();
 };
 
 exports.id_matches_email_operand = function (user_id, email) {
@@ -88,12 +91,12 @@ exports.get_user_id = function (email) {
     if (person === undefined) {
         var error_msg = 'Unknown email for get_user_id: ' + email;
         blueslip.error(error_msg);
-        return undefined;
+        return;
     }
     var user_id = person.user_id;
     if (!user_id) {
-        blueslip.error('No userid found for ' + email);
-        return undefined;
+        blueslip.error('No user_id found for ' + email);
+        return;
     }
 
     return user_id;
@@ -109,6 +112,18 @@ exports.is_known_user_id = function (user_id) {
     */
     return people_by_user_id_dict.has(user_id);
 };
+
+function sort_numerically(user_ids) {
+    user_ids = _.map(user_ids, function (user_id) {
+        return parseInt(user_id, 10);
+    });
+
+    user_ids.sort(function (a, b) {
+        return a - b;
+    });
+
+    return user_ids;
+}
 
 exports.huddle_string = function (message) {
     if (message.type !== 'private') {
@@ -130,7 +145,8 @@ exports.huddle_string = function (message) {
     if (user_ids.length <= 1) {
         return;
     }
-    user_ids.sort();
+
+    user_ids = sort_numerically(user_ids);
 
     return user_ids.join(',');
 };
@@ -175,18 +191,31 @@ exports.reply_to_to_user_ids_string = function (emails_string) {
         return;
     }
 
-    user_ids.sort();
+    user_ids = sort_numerically(user_ids);
 
     return user_ids.join(',');
 };
 
-exports.get_user_time = function (user_id) {
+exports.get_user_time_preferences = function (user_id) {
     var user_timezone = people.get_person_from_user_id(user_id).timezone;
     if (user_timezone) {
         if (page_params.twenty_four_hour_time) {
-            return moment().tz(user_timezone).format("HH:mm");
+            return {
+                timezone: user_timezone,
+                format: "HH:mm",
+            };
         }
-        return moment().tz(user_timezone).format("hh:mm A");
+        return {
+            timezone: user_timezone,
+            format: "hh:mm A",
+        };
+    }
+};
+
+exports.get_user_time = function (user_id) {
+    var user_pref = people.get_user_time_preferences(user_id);
+    if (user_pref) {
+        return moment().tz(user_pref.timezone).format(user_pref.format);
     }
 };
 
@@ -208,7 +237,7 @@ exports.email_list_to_user_ids_string = function (emails) {
         return;
     }
 
-    user_ids.sort();
+    user_ids = sort_numerically(user_ids);
 
     return user_ids.join(',');
 };
@@ -265,6 +294,36 @@ exports.pm_reply_to = function (message) {
     return reply_to;
 };
 
+function sorted_other_user_ids(user_ids) {
+    // This excludes your own user id unless you're the only user
+    // (i.e. you sent a message to yourself).
+
+    var other_user_ids = _.filter(user_ids, function (user_id) {
+        return !people.is_my_user_id(user_id);
+    });
+
+    if (other_user_ids.length >= 1) {
+        user_ids = other_user_ids;
+    } else {
+        user_ids = [my_user_id];
+    }
+
+    user_ids = sort_numerically(user_ids);
+
+    return user_ids;
+}
+
+exports.pm_lookup_key = function (user_ids_string) {
+    /*
+        The server will sometimes include our own user id
+        in keys for PMs, but we only want our user id if
+        we sent a message to ourself.
+    */
+    var user_ids = user_ids_string.split(',');
+    user_ids = sorted_other_user_ids(user_ids);
+    return user_ids.join(',');
+};
+
 exports.pm_with_user_ids = function (message) {
     if (message.type !== 'private') {
         return;
@@ -279,19 +338,31 @@ exports.pm_with_user_ids = function (message) {
         return elem.user_id || elem.id;
     });
 
-    var other_user_ids = _.filter(user_ids, function (user_id) {
-        return !people.is_my_user_id(user_id);
-    });
+    return sorted_other_user_ids(user_ids);
+};
 
-    if (other_user_ids.length >= 1) {
-        user_ids = other_user_ids;
-    } else {
-        user_ids = [my_user_id];
+exports.group_pm_with_user_ids = function (message) {
+    if (message.type !== 'private') {
+        return;
     }
 
-    user_ids.sort();
-
-    return user_ids;
+    if (message.display_recipient.length === 0) {
+        blueslip.error('Empty recipient list in message');
+        return;
+    }
+    var user_ids = _.map(message.display_recipient, function (elem) {
+        return elem.user_id || elem.id;
+    });
+    var is_user_present = _.some(user_ids, function (user_id) {
+        return people.is_my_user_id(user_id);
+    });
+    if (is_user_present) {
+        user_ids.sort();
+        if (user_ids.length > 2) {
+            return user_ids;
+        }
+    }
+    return false;
 };
 
 exports.pm_with_url = function (message) {
@@ -359,6 +430,11 @@ exports.pm_with_operand_ids = function (operand) {
         return people_dict.get(email);
     });
 
+    // If your email is included in a PM group with other people, just ignore it
+    if (persons.length > 1) {
+        persons = _.without(persons, people_by_user_id_dict.get(my_user_id));
+    }
+
     if (!_.all(persons)) {
         return;
     }
@@ -367,7 +443,7 @@ exports.pm_with_operand_ids = function (operand) {
         return person.user_id;
     });
 
-    user_ids.sort();
+    user_ids = sort_numerically(user_ids);
 
     return user_ids;
 };
@@ -413,6 +489,20 @@ exports.sender_is_bot = function (message) {
     return false;
 };
 
+function gravatar_url_for_email(email) {
+    var hash = md5(email.toLowerCase());
+    var avatar_url = 'https://secure.gravatar.com/avatar/' + hash + '?d=identicon';
+    var small_avatar_url = exports.format_small_avatar_url(avatar_url);
+    return small_avatar_url;
+}
+
+exports.small_avatar_url_for_person = function (person) {
+    if (person.avatar_url) {
+        return exports.format_small_avatar_url(person.avatar_url);
+    }
+    return gravatar_url_for_email(person.email);
+};
+
 exports.small_avatar_url = function (message) {
     // Try to call this function in all places where we need 25px
     // avatar images, so that the browser can help
@@ -422,9 +512,7 @@ exports.small_avatar_url = function (message) {
     // We actually request these at s=50, so that we look better
     // on retina displays.
 
-    var url = "";
     var person;
-
     if (message.sender_id) {
         // We should always have message.sender_id, except for in the
         // tutorial, where it's ok to fall back to the url in the fake
@@ -435,26 +523,67 @@ exports.small_avatar_url = function (message) {
     // The first time we encounter a sender in a message, we may
     // not have person.avatar_url set, but if we do, then use that.
     if (person && person.avatar_url) {
-        url = person.avatar_url;
-    } else if (message.avatar_url) {
-        // Here we fall back to using the avatar_url from the message
-        // itself.
-        url = message.avatar_url;
+        return exports.small_avatar_url_for_person(person);
     }
 
-    if (url) {
-        url = exports.format_small_avatar_url(url);
+    // Try to get info from the message if we didn't have a `person` object
+    // or if the avatar was missing. We do this verbosely to avoid false
+    // positives on line coverage (we don't do branch checking).
+    if (message.avatar_url) {
+        return exports.format_small_avatar_url(message.avatar_url);
     }
 
-    return url;
+    // For computing the user's email, we first trust the person
+    // object since that is updated via our real-time sync system, but
+    // if unavailable, we use the sender email.
+    var email;
+    if (person) {
+        email = person.email;
+    } else {
+        email = message.sender_email;
+    }
+
+    return gravatar_url_for_email(email);
 };
 
-exports.realm_get = function realm_get(email) {
+exports.is_valid_email_for_compose = function (email) {
+    if (people.is_cross_realm_email(email)) {
+        return true;
+    }
+
     var person = people.get_by_email(email);
     if (!person) {
-        return undefined;
+        return false;
     }
-    return realm_people_dict.get(person.user_id);
+    return active_user_dict.has(person.user_id);
+};
+
+exports.get_active_user_for_email = function (email) {
+    var person = people.get_by_email(email);
+    if (!person) {
+        return;
+    }
+    return active_user_dict.get(person.user_id);
+};
+
+exports.is_active_user_for_popover = function (user_id) {
+    // For popover menus, we include cross-realm bots as active
+    // users.
+
+    if (cross_realm_dict.get(user_id)) {
+        return true;
+    }
+    if (active_user_dict.has(user_id)) {
+        return true;
+    }
+
+    // TODO: We can report errors here once we start loading
+    //       deactivated users at page-load time. For now just warn.
+    if (!people_by_user_id_dict.has(user_id)) {
+        blueslip.warn("Unexpectedly invalid user_id in user popover query: " + user_id);
+    }
+
+    return false;
 };
 
 exports.get_all_persons = function () {
@@ -462,13 +591,18 @@ exports.get_all_persons = function () {
 };
 
 exports.get_realm_persons = function () {
-    return realm_people_dict.values();
+    return active_user_dict.values();
+};
+
+exports.get_active_user_ids = function () {
+    // This includes active users and active bots.
+    return active_user_dict.keys();
 };
 
 exports.is_cross_realm_email = function (email) {
     var person = people.get_by_email(email);
     if (!person) {
-        return undefined;
+        return;
     }
     return cross_realm_dict.has(person.user_id);
 };
@@ -492,61 +626,73 @@ exports.incr_recipient_count = function (user_id) {
     pm_recipient_count_dict.set(user_id, old_count + 1);
 };
 
-exports.filter_people_by_search_terms = function (users, search_terms) {
-        var filtered_users = new Dict();
+// Diacritic removal from:
+// https://stackoverflow.com/questions/18236208/perform-a-find-match-with-javascript-ignoring-special-language-characters-acce
+function remove_diacritics(s) {
+    if (/^[a-z]+$/.test(s)) {
+        return s;
+    }
 
-        var matchers = _.map(search_terms, function (search_term) {
-            var termlets = search_term.toLowerCase().split(/\s+/);
-            termlets = _.map(termlets, function (termlet) {
-                return termlet.trim();
-            });
+    return s.replace(/[áàãâä]/g,"a")
+        .replace(/[éèëê]/g,"e")
+        .replace(/[íìïî]/g,"i")
+        .replace(/[óòöôõ]/g,"o")
+        .replace(/[úùüû]/g, "u")
+        .replace(/[ç]/g, "c")
+        .replace(/[ñ]/g, "n");
+}
 
-            return function (email, names) {
-                if (email.indexOf(search_term.trim()) === 0) {
-                    return true;
-                }
-                return _.all(termlets, function (termlet) {
-                    return _.any(names, function (name) {
-                        if (name.indexOf(termlet) === 0) {
-                            return true;
-                        }
-                    });
-                });
-            };
-        });
+exports.person_matches_query = function (user, query) {
+    var email = user.email.toLowerCase();
+    var names = user.full_name.toLowerCase().split(' ');
 
+    var termlets = query.toLowerCase().split(/\s+/);
+    termlets = _.map(termlets, function (termlet) {
+        return termlet.trim();
+    });
 
-        // Loop through users and populate filtered_users only
-        // if they include search_terms
-        _.each(users, function (user) {
-            var person = exports.get_by_email(user.email);
-            // Get person object (and ignore errors)
-            if (!person || !person.full_name) {
-                return;
+    if (email.indexOf(query.trim()) === 0) {
+        return true;
+    }
+    return _.all(termlets, function (termlet) {
+        var is_ascii = /^[a-z]+$/.test(termlet);
+        return _.any(names, function (name) {
+            if (is_ascii) {
+                // Only ignore diacritics if the query is plain ascii
+                name = remove_diacritics(name);
             }
-
-            var email = user.email.toLowerCase();
-
-            // Remove extra whitespace
-            var names = person.full_name.toLowerCase().split(/\s+/);
-            names = _.map(names, function (name) {
-                return name.trim();
-            });
-
-
-            // Return user emails that include search terms
-            var match = _.any(matchers, function (matcher) {
-                return matcher(email, names);
-            });
-
-            if (match) {
-                filtered_users.set(person.user_id, true);
+            if (name.indexOf(termlet) === 0) {
+                return true;
             }
         });
-        return filtered_users;
+    });
 };
 
-exports.get_by_name = function realm_get(name) {
+exports.filter_people_by_search_terms = function (users, search_terms) {
+    var filtered_users = new Dict();
+
+    // Loop through users and populate filtered_users only
+    // if they include search_terms
+    _.each(users, function (user) {
+        var person = exports.get_by_email(user.email);
+        // Get person object (and ignore errors)
+        if (!person || !person.full_name) {
+            return;
+        }
+
+        // Return user emails that include search terms
+        var match = _.any(search_terms, function (search_term) {
+            return exports.person_matches_query(user, search_term);
+        });
+
+        if (match) {
+            filtered_users.set(person.user_id, true);
+        }
+    });
+    return filtered_users;
+};
+
+exports.get_by_name = function (name) {
     return people_by_name_dict.get(name);
 };
 
@@ -562,7 +708,7 @@ function people_cmp(person1, person2) {
 
 exports.get_rest_of_realm = function get_rest_of_realm() {
     var people_minus_you = [];
-    realm_people_dict.each(function (person) {
+    active_user_dict.each(function (person) {
         if (!exports.is_current_user(person.email)) {
             people_minus_you.push({email: person.email,
                                    user_id: person.user_id,
@@ -590,7 +736,7 @@ exports.add = function add(person) {
 };
 
 exports.add_in_realm = function (person) {
-    realm_people_dict.set(person.user_id, person);
+    active_user_dict.set(person.user_id, person);
     exports.add(person);
 };
 
@@ -598,7 +744,20 @@ exports.deactivate = function (person) {
     // We don't fully remove a person from all of our data
     // structures, because deactivated users can be part
     // of somebody's PM list.
-    realm_people_dict.del(person.user_id);
+    active_user_dict.del(person.user_id);
+};
+
+exports.report_late_add = function (user_id, email) {
+    // This function is extracted to make unit testing easier,
+    // plus we may fine-tune our reporting here for different
+    // types of realms.
+    var msg = 'Added user late: user_id=' + user_id + ' email=' + email;
+
+    if (reload.is_in_progress) {
+        blueslip.log(msg);
+    } else {
+        blueslip.error(msg);
+    }
 };
 
 exports.extract_people_from_message = function (message) {
@@ -618,25 +777,46 @@ exports.extract_people_from_message = function (message) {
 
     // Add new people involved in this message to the people list
     _.each(involved_people, function (person) {
-        if (!person.unknown_local_echo_user) {
-
-            var user_id = person.user_id || person.id;
-
-            if (!people_by_user_id_dict.has(user_id)) {
-                exports.add({
-                    email: person.email,
-                    user_id: user_id,
-                    full_name: person.full_name,
-                    is_admin: person.is_realm_admin || false,
-                    is_bot: person.is_bot || false,
-                });
-            }
-
-            if (message.type === 'private' && message.sent_by_me) {
-                // Track the number of PMs we've sent to this person to improve autocomplete
-                exports.incr_recipient_count(user_id);
-            }
+        if (person.unknown_local_echo_user) {
+            return;
         }
+
+        var user_id = person.user_id || person.id;
+
+        if (people_by_user_id_dict.has(user_id)) {
+            return;
+        }
+
+        exports.report_late_add(user_id, person.email);
+
+        exports.add({
+            email: person.email,
+            user_id: user_id,
+            full_name: person.full_name,
+            is_admin: person.is_realm_admin || false,
+            is_bot: person.is_bot || false,
+        });
+    });
+};
+
+exports.maybe_incr_recipient_count = function (message) {
+    if (message.type !== 'private') {
+        return;
+    }
+
+    if (!message.sent_by_me) {
+        return;
+    }
+
+    // Track the number of PMs we've sent to this person to improve autocomplete
+    _.each(message.display_recipient, function (person) {
+
+        if (person.unknown_local_echo_user) {
+            return;
+        }
+
+        var user_id = person.user_id || person.id;
+        exports.incr_recipient_count(user_id);
     });
 };
 
@@ -646,6 +826,14 @@ exports.set_full_name = function (person_obj, new_full_name) {
     }
     people_by_name_dict.set(new_full_name, person_obj);
     person_obj.full_name = new_full_name;
+};
+
+exports.set_custom_profile_field_data = function (user_id, field) {
+    if (field.id === undefined) {
+        blueslip.error("Unknown field id " + field.id);
+        return;
+    }
+    people_by_user_id_dict.get(user_id).profile_data[field.id] = field.value;
 };
 
 exports.is_current_user = function (email) {
@@ -672,6 +860,18 @@ exports.my_current_user_id = function () {
     return my_user_id;
 };
 
+exports.my_custom_profile_data = function (field_id) {
+    if (field_id === undefined) {
+        blueslip.error("Undefined field id");
+        return;
+    }
+    return exports.get_custom_profile_data(my_user_id, field_id);
+};
+
+exports.get_custom_profile_data = function (user_id, field_id) {
+    return people_by_user_id_dict.get(user_id).profile_data[field_id];
+};
+
 exports.is_my_user_id = function (user_id) {
     if (!user_id) {
         return false;
@@ -684,6 +884,10 @@ exports.initialize = function () {
         exports.add_in_realm(person);
     });
 
+    _.each(page_params.realm_non_active_users, function (person) {
+        exports.add(person);
+    });
+
     _.each(page_params.cross_realm_bots, function (person) {
         if (!people_dict.has(person.email)) {
             exports.add(person);
@@ -694,6 +898,7 @@ exports.initialize = function () {
     exports.initialize_current_user(page_params.user_id);
 
     delete page_params.realm_users; // We are the only consumer of this.
+    delete page_params.realm_non_active_users;
     delete page_params.cross_realm_bots;
 };
 

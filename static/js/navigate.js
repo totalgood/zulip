@@ -30,7 +30,7 @@ exports.down = function (with_centering) {
         // FIXME: this doesn't work for End because rows.last_visible()
         // always returns a message.
         var current_msg_table = rows.get_table(current_msg_list.table_name);
-        message_viewport.scrollTop(current_msg_table.outerHeight(true) -
+        message_viewport.scrollTop(current_msg_table.safeOuterHeight(true) -
                                    message_viewport.height() * 0.1);
         unread_ops.mark_current_list_as_read();
     }
@@ -38,10 +38,9 @@ exports.down = function (with_centering) {
 
 exports.to_home = function () {
     message_viewport.last_movement_direction = -1;
-    var next_row = rows.first_visible(current_msg_list.selected_row());
-    if (next_row.length !== 0) {
-        go_to_row(next_row);
-    }
+    var first_id = current_msg_list.first().id;
+    current_msg_list.select_id(first_id, {then_scroll: true,
+                                          from_scroll: true});
 };
 
 exports.to_end = function () {
@@ -113,41 +112,6 @@ exports.page_down = function () {
     } else {
         exports.page_down_the_right_amount();
     }
-};
-
-exports.cycle_stream = function (direction) {
-    var currentStream;
-    var nextStream;
-    var stream_name = narrow_state.stream();
-    if (stream_name !== undefined) {
-        var stream_id = stream_data.get_stream_id(stream_name);
-        currentStream = stream_list.get_stream_li(stream_id);
-    }
-    switch (direction) {
-        case 'forward':
-            if (narrow_state.stream() === undefined) {
-                nextStream = $("#stream_filters").children('.narrow-filter').first();
-            } else {
-                nextStream = currentStream.next('.narrow-filter');
-                if (nextStream.length === 0) {
-                    nextStream = $("#stream_filters").children('.narrow-filter').first();
-                }
-            }
-            break;
-        case 'backward':
-            if (narrow_state.stream() === undefined) {
-                nextStream = $("#stream_filters").children('.narrow-filter').last();
-            } else {
-                nextStream = currentStream.prev('.narrow-filter');
-                if (nextStream.length === 0) {
-                    nextStream = $("#stream_filters").children('.narrow-filter').last();
-                }
-            }
-            break;
-        default:
-            blueslip.error("Invalid parameter to cycle_stream", {value: direction});
-    }
-    narrow.by('stream', nextStream.data('name'));
 };
 
 exports.scroll_to_selected = function () {

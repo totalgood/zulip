@@ -1,53 +1,57 @@
 # When adding new functions/classes to this file, you need to also add
-# their types to request.pyi in this directory (the mypy stubs file to
-# make REQ be treated properly by mypy) so that mypy understands them.
-from __future__ import absolute_import
+# their types to request.pyi in this directory (a mypy stubs file that
+# we use to ensure mypy does correct type inference with REQ, which it
+# can't do by default due to the dynamic nature of REQ).
+#
+# Because request.pyi exists, the type annotations in this file are
+# mostly not processed by mypy.
 from functools import wraps
 import ujson
-from six.moves import zip
 
 from django.utils.translation import ugettext as _
 
-class JsonableError(Exception):
-    def __init__(self, error, status_code=400):
-        self.error = error
-        self.status_code = status_code
+from zerver.lib.exceptions import JsonableError, ErrorCode
 
-    def __str__(self):
-        return self.to_json_error_msg()
+from django.http import HttpRequest, HttpResponse
 
-    def to_json_error_msg(self):
-        return self.error
+from typing import Any, Callable, Type
 
 class RequestVariableMissingError(JsonableError):
-    def __init__(self, var_name, status_code=400):
-        self.var_name = var_name
-        self.status_code = status_code
+    code = ErrorCode.REQUEST_VARIABLE_MISSING
+    data_fields = ['var_name']
 
-    def to_json_error_msg(self):
-        return _("Missing '%s' argument") % (self.var_name,)
+    def __init__(self, var_name: str) -> None:
+        self.var_name = var_name  # type: str
+
+    @staticmethod
+    def msg_format() -> str:
+        return _("Missing '{var_name}' argument")
 
 class RequestVariableConversionError(JsonableError):
-    def __init__(self, var_name, bad_value, status_code=400):
-        self.var_name = var_name
-        self.bad_value = bad_value
-        self.status_code = status_code
+    code = ErrorCode.REQUEST_VARIABLE_INVALID
+    data_fields = ['var_name', 'bad_value']
 
-    def to_json_error_msg(self):
-        return (_("Bad value for '%(var_name)s': %(value)s") %
-                {'var_name': self.var_name, 'value': self.bad_value})
+    def __init__(self, var_name: str, bad_value: Any) -> None:
+        self.var_name = var_name  # type: str
+        self.bad_value = bad_value
+
+    @staticmethod
+    def msg_format() -> str:
+        return _("Bad value for '{var_name}': {bad_value}")
 
 # Used in conjunction with @has_request_variables, below
-class REQ(object):
+class REQ:
     # NotSpecified is a sentinel value for determining whether a
     # default value was specified for a request variable.  We can't
     # use None because that could be a valid, user-specified default
-    class _NotSpecified(object):
+    class _NotSpecified:
         pass
     NotSpecified = _NotSpecified()
 
-    def __init__(self, whence=None, converter=None, default=NotSpecified,
-                 validator=None, argument_type=None):
+    def __init__(self, whence: str=None, *, converter: Callable[[Any], Any]=None,
+                 default: Any=NotSpecified, validator: Callable[[Any], Any]=None,
+                 str_validator: Callable[[Any], Any]=None,
+                 argument_type: str=None, type: Type=None) -> None:
         """whence: the name of the request variable that should be used
         for this parameter.  Defaults to a request variable of the
         same name as the parameter.
@@ -63,20 +67,30 @@ class REQ(object):
         data structure.  If specified, we will parse the JSON request
         variable value before passing to the function
 
+        str_validator: Like validator, but doesn't parse JSON first.
+
         argument_type: pass 'body' to extract the parsed JSON
         corresponding to the request body
+
+        type: a hint to typing (using mypy) what the type of this parameter is.
+        Currently only typically necessary if default=None and the type cannot
+        be inferred in another way (eg. via converter).
         """
 
         self.post_var_name = whence
         self.func_var_name = None  # type: str
         self.converter = converter
         self.validator = validator
+        self.str_validator = str_validator
         self.default = default
         self.argument_type = argument_type
 
-        if converter and validator:
+        if converter and (validator or str_validator):
             # Not user-facing, so shouldn't be tagged for translation
             raise AssertionError('converter and validator are mutually exclusive')
+        if validator and str_validator:
+            # Not user-facing, so shouldn't be tagged for translation
+            raise AssertionError('validator and str_validator are mutually exclusive')
 
 # Extracts variables from the request object and passes them as
 # named function arguments.  The request object must be the first
@@ -95,6 +109,7 @@ class REQ(object):
 # expected to call json_error or json_success, as it uses json_error
 # internally when it encounters an error
 def has_request_variables(view_func):
+    # type: (Callable[[HttpRequest, Any, Any], HttpResponse]) -> Callable[[HttpRequest, *Any, **Any], HttpResponse]
     num_params = view_func.__code__.co_argcount
     if view_func.__defaults__ is None:
         num_default_params = 0
@@ -115,7 +130,7 @@ def has_request_variables(view_func):
             post_params.append(value)
 
     @wraps(view_func)
-    def _wrapped_view_func(request, *args, **kwargs):
+    def _wrapped_view_func(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         for param in post_params:
             if param.func_var_name in kwargs:
                 continue
@@ -155,9 +170,15 @@ def has_request_variables(view_func):
                 try:
                     val = ujson.loads(val)
                 except Exception:
-                    raise JsonableError(_('argument "%s" is not valid json.') % (param.post_var_name,))
+                    raise JsonableError(_('Argument "%s" is not valid JSON.') % (param.post_var_name,))
 
                 error = param.validator(param.post_var_name, val)
+                if error:
+                    raise JsonableError(error)
+
+            # str_validators is like validator, but for direct strings (no JSON parsing).
+            if param.str_validator is not None and not default_assigned:
+                error = param.str_validator(param.post_var_name, val)
                 if error:
                     raise JsonableError(error)
 

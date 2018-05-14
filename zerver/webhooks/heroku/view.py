@@ -1,22 +1,20 @@
 # Webhooks for external integrations.
-from __future__ import absolute_import
-from typing import Text
 
 from django.http import HttpRequest, HttpResponse
 
-from zerver.lib.actions import check_send_message
+from zerver.decorator import api_key_only_webhook_view
+from zerver.lib.request import REQ, has_request_variables
 from zerver.lib.response import json_success
-from zerver.decorator import REQ, has_request_variables, api_key_only_webhook_view
+from zerver.lib.webhooks.common import check_send_webhook_message
 from zerver.models import UserProfile
-
 
 @api_key_only_webhook_view("Heroku")
 @has_request_variables
-def api_heroku_webhook(request, user_profile, stream=REQ(default="heroku"),
-                       head=REQ(), app=REQ(), user=REQ(), url=REQ(), git_log=REQ()):
-    # type: (HttpRequest, UserProfile, Text, Text, Text, Text, Text, Text) -> HttpResponse
+def api_heroku_webhook(request: HttpRequest, user_profile: UserProfile,
+                       head: str=REQ(), app: str=REQ(), user: str=REQ(),
+                       url: str=REQ(), git_log: str=REQ()) -> HttpResponse:
     template = "{} deployed version {} of [{}]({})\n> {}"
     content = template.format(user, head, app, url, git_log)
 
-    check_send_message(user_profile, request.client, "stream", [stream], app, content)
+    check_send_webhook_message(request, user_profile, app, content)
     return json_success()

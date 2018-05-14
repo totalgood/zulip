@@ -1,4 +1,4 @@
-var REALMS_HAVE_SUBDOMAINS = casper.cli.get('subdomains');
+var util = require("util");
 var common = (function () {
 
 var exports = {};
@@ -74,8 +74,28 @@ exports.initialize_casper = function () {
         });
     });
 
+    // This function should always be enclosed within a then() otherwise
+    // it might not exist on casper object.
+    casper.waitForSelectorText = function (selector, text, then, onTimeout, timeout) {
+        this.waitForSelector(selector, function _then() {
+            this.waitFor(function _check() {
+                var content = this.fetchText(selector);
+                if (util.isRegExp(text)) {
+                    return text.test(content);
+                }
+                return content.indexOf(text) !== -1;
+            }, then, onTimeout, timeout);
+        }, onTimeout, timeout);
+        return this;
+    };
+
     casper.evaluate(function () {
         window.localStorage.clear();
+    });
+
+    // This captures console messages from the app.
+    casper.on('remote.message', function (msg) {
+        casper.echo("app console: " + msg);
     });
 };
 
@@ -86,12 +106,7 @@ exports.then_log_in = function (credentials) {
 };
 
 exports.start_and_log_in = function (credentials, viewport) {
-    var log_in_url = "";
-    if (REALMS_HAVE_SUBDOMAINS) {
-        log_in_url = "http://zulip.zulipdev.com:9981/accounts/login";
-    } else {
-        log_in_url = "http://zulipdev.com:9981/accounts/login";
-    }
+    var log_in_url = "http://zulip.zulipdev.com:9981/accounts/login";
     exports.init_viewport();
     casper.start(log_in_url, function () {
         exports.initialize_casper(viewport);
@@ -99,9 +114,17 @@ exports.start_and_log_in = function (credentials, viewport) {
     });
 };
 
+exports.then_click = function (selector) {
+    casper.then(function () {
+        casper.waitUntilVisible(selector, function () {
+            casper.click(selector);
+        });
+    });
+};
+
 exports.then_log_out = function () {
     var menu_selector = '#settings-dropdown';
-    var logout_selector = 'li[title="Log out"] a';
+    var logout_selector = 'a[href="#logout"]';
 
     casper.waitUntilVisible(menu_selector, function () {
         casper.click(menu_selector);
@@ -150,15 +173,6 @@ exports.select_item_via_typeahead = function (field_selector, str, item) {
     });
 };
 
-exports.enable_page_console = function () {
-    // Call this (after casper.start) to enable printing page-context
-    // console.log (plus some CasperJS-specific messages) to the
-    // terminal.
-    casper.on('remote.message', function (msg) {
-        casper.echo(msg);
-    });
-};
-
 exports.check_form = function (form_selector, expected, test_name) {
     var values = casper.getFormValues(form_selector);
     var k;
@@ -173,7 +187,7 @@ exports.check_form = function (form_selector, expected, test_name) {
 exports.wait_for_message_actually_sent = function () {
     casper.waitFor(function () {
         return casper.evaluate(function () {
-            return current_msg_list.last().local_id === undefined;
+            return !current_msg_list.last().locally_echoed;
         });
     });
 };
@@ -191,21 +205,41 @@ exports.turn_off_press_enter_to_send = function () {
     }
 };
 
+exports.pm_recipient = {
+    set: function (recip) {
+        casper.evaluate(function (recipient) {
+            $("#private_message_recipient").text(recipient)
+                .trigger({ type: "keydown", keyCode: 13 });
+        }, { recipient: recip });
+    },
+
+    expect: function (expected_value) {
+        var displayed_recipients = casper.evaluate(function () {
+            return compose_state.recipient();
+        });
+        casper.test.assertEquals(displayed_recipients, expected_value);
+    },
+};
+
 // Wait for any previous send to finish, then send a message.
 exports.then_send_message = function (type, params) {
     casper.then(function () {
         casper.waitForSelector('#compose-send-button:enabled');
-        casper.waitForSelector('#new_message_content');
+        casper.waitForSelector('#compose-textarea');
     });
 
     casper.then(function () {
         if (type === "stream") {
             casper.page.sendEvent('keypress', "c");
         } else if (type === "private") {
-            casper.page.sendEvent('keypress', "C");
+            casper.page.sendEvent('keypress', "x");
         } else {
             casper.test.assertTrue(false, "send_message got valid message type");
         }
+
+        exports.pm_recipient.set(params.recipient);
+        delete params.recipient;
+
         casper.fill('form[action^="/json/messages"]', params);
 
         exports.turn_off_press_enter_to_send();
@@ -220,6 +254,9 @@ exports.then_send_message = function (type, params) {
             return casper.getFormValues('form[action^="/json/messages"]').content === '';
         });
         exports.wait_for_message_actually_sent();
+        casper.evaluate(function () {
+            compose_actions.cancel();
+        });
     });
 
     casper.then(function () {

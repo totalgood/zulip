@@ -30,7 +30,7 @@ function call(args, idempotent) {
 
         if (xhr.status === 403) {
             try {
-                if (JSON.parse(xhr.responseText).msg.indexOf("CSRF Error:") !== -1) {
+                if (JSON.parse(xhr.responseText).code === 'CSRF_FAILED') {
                     reload.initiate({immediate: true,
                                      save_pointer: true,
                                      save_narrow: true,
@@ -68,12 +68,6 @@ function call(args, idempotent) {
     add_pending_request(jqXHR);
     return jqXHR;
 }
-
-exports.abort_all = function () {
-    _.each(pending_requests, function (jqXHR) {
-        jqXHR.abort();
-    });
-};
 
 exports.get = function (options) {
     var args = _.extend({type: "GET", dataType: "json"}, options);

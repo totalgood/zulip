@@ -6,6 +6,7 @@ var exports = {};
 // module.  Both are popped up from the left sidebar.
 var current_stream_sidebar_elem;
 var current_topic_sidebar_elem;
+var all_messages_sidebar_elem;
 
 exports.stream_popped = function () {
     return current_stream_sidebar_elem !== undefined;
@@ -13,6 +14,10 @@ exports.stream_popped = function () {
 
 exports.topic_popped = function () {
     return current_topic_sidebar_elem !== undefined;
+};
+
+exports.all_messages_popped = function () {
+    return all_messages_sidebar_elem !== undefined;
 };
 
 exports.hide_stream_popover = function () {
@@ -26,6 +31,13 @@ exports.hide_topic_popover = function () {
     if (exports.topic_popped()) {
         $(current_topic_sidebar_elem).popover("destroy");
         current_topic_sidebar_elem = undefined;
+    }
+};
+
+exports.hide_all_messages_popover = function () {
+    if (exports.all_messages_popped()) {
+        $(all_messages_sidebar_elem).popover("destroy");
+        all_messages_sidebar_elem = undefined;
     }
 };
 
@@ -43,11 +55,10 @@ exports.restore_stream_list_size = function () {
 
 
 function stream_popover_sub(e) {
-    // TODO: use data-stream-id in stream list
-    var stream_name = $(e.currentTarget).parents('ul').attr('data-name');
-    var sub = stream_data.get_sub(stream_name);
+    var stream_id = $(e.currentTarget).parents('ul').attr('data-stream-id');
+    var sub = stream_data.get_sub_by_id(stream_id);
     if (!sub) {
-        blueslip.error('Unknown stream: ' + stream_name);
+        blueslip.error('Unknown stream: ' + stream_id);
         return;
     }
     return sub;
@@ -84,11 +95,11 @@ function build_stream_popover(e) {
     popovers.hide_all();
     exports.show_streamlist_sidebar();
 
-    var stream = $(elt).parents('li').attr('data-name');
+    var stream_id = $(elt).parents('li').attr('data-stream-id');
 
     var content = templates.render(
         'stream_sidebar_actions',
-        {stream: stream_data.get_sub(stream)}
+        {stream: stream_data.get_sub_by_id(stream_id)}
     );
 
     $(elt).popover({
@@ -98,8 +109,7 @@ function build_stream_popover(e) {
     });
 
     $(elt).popover("show");
-    var data_id = stream_data.get_sub(stream).stream_id;
-    var popover = $('.streams_popover[data-id=' + data_id + ']');
+    var popover = $('.streams_popover[data-stream-id=' + stream_id + ']');
 
     update_spectrum(popover, function (colorpicker) {
         colorpicker.spectrum(stream_color.sidebar_popover_colorpicker_options);
@@ -120,24 +130,24 @@ function build_topic_popover(e) {
         return;
     }
 
-    var stream_name = $(elt).closest('.topic-list').expectOne().attr('data-stream');
-    var topic_name = $(elt).closest('li').expectOne().attr('data-name');
+    var stream_id = $(elt).closest('.narrow-filter').expectOne().attr('data-stream-id');
+    var topic_name = $(elt).closest('li').expectOne().attr('data-topic-name');
 
-    var sub = stream_data.get_sub(stream_name);
+    var sub = stream_data.get_sub_by_id(stream_id);
     if (!sub) {
-        blueslip.error('cannot build topic popover for stream: ' + stream_name);
+        blueslip.error('cannot build topic popover for stream: ' + stream_id);
         return;
     }
 
     popovers.hide_all();
     exports.show_streamlist_sidebar();
 
-    var is_muted = muting.is_topic_muted(stream_name, topic_name);
+    var is_muted = muting.is_topic_muted(sub.name, topic_name);
     var can_mute_topic = !is_muted;
     var can_unmute_topic = is_muted;
 
     var content = templates.render('topic_sidebar_actions', {
-        stream_name: stream_name,
+        stream_name: sub.name,
         stream_id: sub.stream_id,
         topic_name: topic_name,
         can_mute_topic: can_mute_topic,
@@ -156,12 +166,38 @@ function build_topic_popover(e) {
     e.stopPropagation();
 }
 
-exports.register_click_handlers = function () {
-    $('#stream_filters').on('click',
-        '.stream-sidebar-arrow', build_stream_popover);
+function build_all_messages_popover(e) {
+    var elt = e.target;
 
-    $('#stream_filters').on('click',
-        '.topic-sidebar-arrow', build_topic_popover);
+    if (exports.all_messages_popped()
+        && all_messages_sidebar_elem === elt) {
+        exports.hide_all_messages_popover();
+        e.stopPropagation();
+        return;
+    }
+
+    popovers.hide_all();
+
+    var content = templates.render(
+        'all_messages_sidebar_actions'
+    );
+
+    $(elt).popover({
+        content: content,
+        trigger: "manual",
+        fixed: true,
+    });
+
+    $(elt).popover("show");
+    all_messages_sidebar_elem = elt;
+    e.stopPropagation();
+
+}
+
+exports.register_click_handlers = function () {
+    $('#stream_filters').on('click', '.stream-sidebar-arrow', build_stream_popover);
+    $('#stream_filters').on('click', '.topic-sidebar-arrow', build_topic_popover);
+    $('#global_filters').on('click', '.stream-sidebar-arrow', build_all_messages_popover);
 
     exports.register_stream_handlers();
     exports.register_topic_handlers();
@@ -177,7 +213,7 @@ exports.register_stream_handlers = function () {
         // the template for subs needs to render.
 
         subs.onlaunch("narrow_to_row", function () {
-            $(".stream-row[data-stream-name='" + sub.name + "']").click();
+            $(".stream-row[data-stream-id='" + sub.stream_id + "']").click();
         }, true);
     });
 
@@ -185,8 +221,7 @@ exports.register_stream_handlers = function () {
     $('body').on('click', '.narrow_to_stream', function (e) {
         var sub = stream_popover_sub(e);
         exports.hide_stream_popover();
-        narrow.by('stream', sub.name,
-            {select_first_unread: true, trigger: 'sidebar popover'}
+        narrow.by('stream', sub.name, {trigger: 'sidebar popover'}
         );
         e.stopPropagation();
     });
@@ -207,11 +242,18 @@ exports.register_stream_handlers = function () {
         e.stopPropagation();
     });
 
-    // Mark all messages as read
+    // Mark all messages in stream as read
     $('body').on('click', '.mark_stream_as_read', function (e) {
         var sub = stream_popover_sub(e);
         exports.hide_stream_popover();
-        unread_ops.mark_stream_as_read(sub.name);
+        unread_ops.mark_stream_as_read(sub.stream_id);
+        e.stopPropagation();
+    });
+
+    // Mark all messages as read
+    $('body').on('click', '#mark_all_messages_as_read', function (e) {
+        exports.hide_all_messages_popover();
+        pointer.fast_forward_pointer();
         e.stopPropagation();
     });
 
@@ -287,8 +329,7 @@ exports.register_topic_handlers = function () {
             {operator: 'stream', operand: sub.name},
             {operator: 'topic', operand: topic},
         ];
-        var opts = {select_first_unread: true, trigger: 'sidebar'};
-        narrow.activate(operators, opts);
+        narrow.activate(operators, {trigger: 'sidebar'});
 
         e.stopPropagation();
     });
@@ -328,7 +369,7 @@ exports.register_topic_handlers = function () {
 
         var topic = $(e.currentTarget).attr('data-topic-name');
         exports.hide_topic_popover();
-        unread_ops.mark_topic_as_read(sub.name, topic);
+        unread_ops.mark_topic_as_read(sub.stream_id, topic);
         e.stopPropagation();
     });
 };

@@ -1,9 +1,10 @@
-#!/usr/bin/env python
-from __future__ import print_function
-import optparse
+#!/usr/bin/env python3
+import argparse
 import os
+import shutil
 import subprocess
 import sys
+from typing import Dict, Any
 
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(TOOLS_DIR))
@@ -13,20 +14,79 @@ ROOT_DIR = os.path.dirname(TOOLS_DIR)
 from tools.lib import sanity_check
 sanity_check.check_venv(__file__)
 
+# Import this after we do the sanity_check so it doesn't crash.
+import ujson
+
 USAGE = '''
     tools/test-js-with-node                      - to run all tests
     tools/test-js-with-node util.js activity.js  - to run just a couple tests
     tools/test-js-with-node --coverage           - to generage coverage report
     '''
 
-parser = optparse.OptionParser(USAGE)
-parser.add_option('--coverage', dest='coverage',
-                  action="store_true",
-                  default=False, help='Get coverage report')
-parser.add_option('--force', dest='force',
-                  action="store_true",
-                  default=False, help='Run tests despite possible problems.')
-(options, args) = parser.parse_args()
+enforce_fully_covered = {
+    'static/js/activity.js',
+    'static/js/alert_words.js',
+    'static/js/bot_data.js',
+    'static/js/buddy_data.js',
+    'static/js/buddy_list.js',
+    'static/js/channel.js',
+    'static/js/colorspace.js',
+    'static/js/common.js',
+    'static/js/components.js',
+    'static/js/compose_pm_pill.js',
+    'static/js/compose_state.js',
+    'static/js/compose_ui.js',
+    'static/js/composebox_typeahead.js',
+    'static/js/dict.js',
+    'static/js/emoji.js',
+    'static/js/fenced_code.js',
+    'static/js/fetch_status.js',
+    'static/js/filter.js',
+    'static/js/hash_util.js',
+    'static/js/markdown.js',
+    'static/js/message_store.js',
+    'static/js/muting.js',
+    'static/js/narrow_state.js',
+    'static/js/people.js',
+    'static/js/pm_conversations.js',
+    'static/js/pm_list.js',
+    'static/js/presence.js',
+    'static/js/reactions.js',
+    'static/js/recent_senders.js',
+    'static/js/rtl.js',
+    'static/js/scroll_util.js',
+    'static/js/search_suggestion.js',
+    # Removed because we're migrating code from uncovered other settings pages to here.
+    # 'static/js/settings_ui.js',
+    'static/js/settings_muting.js',
+    'static/js/settings_user_groups.js',
+    'static/js/stream_data.js',
+    'static/js/stream_events.js',
+    'static/js/stream_sort.js',
+    'static/js/top_left_corner.js',
+    'static/js/topic_data.js',
+    'static/js/topic_generator.js',
+    'static/js/transmit.js',
+    'static/js/typeahead_helper.js',
+    'static/js/typing_data.js',
+    'static/js/typing_status.js',
+    'static/js/unread.js',
+    'static/js/user_events.js',
+    'static/js/user_groups.js',
+    'static/js/user_pill.js',
+    'static/js/user_search.js',
+    'static/js/util.js',
+}
+
+parser = argparse.ArgumentParser(USAGE)
+parser.add_argument('--coverage', dest='coverage',
+                    action="store_true",
+                    default=False, help='Get coverage report')
+parser.add_argument('--force', dest='force',
+                    action="store_true",
+                    default=False, help='Run tests despite possible problems.')
+parser.add_argument('args', nargs=argparse.REMAINDER)
+options = parser.parse_args()
 
 from tools.lib.test_script import get_provisioning_status
 
@@ -38,25 +98,41 @@ if not options.force:
         sys.exit(1)
 
 os.environ['NODE_PATH'] = 'static'
+os.environ['TZ'] = 'UTC'
 
 INDEX_JS = 'frontend_tests/zjsunit/index.js'
 
+# Add ".js" to the end of all the file arguments, so index.js
+# can actually verify if the file exists or not.
+for index, arg in enumerate(options.args):
+    if not arg.endswith('.js'):
+        options.args[index] = arg + '.js'
+
+individual_files = options.args
+
 # The index.js test runner is the real "driver" here, and we launch
-# with either istanbul or node, depending on whether we want coverage
-# reports.  Running under istanbul is slower and creates funny
+# with either nyc or node, depending on whether we want coverage
+# reports.  Running under nyc is slower and creates funny
 # tracebacks, so you generally want to get coverage reports only
 # after making sure tests will pass.
+node_tests_cmd = ['node', '--stack-trace-limit=100', INDEX_JS]
+node_tests_cmd += individual_files
 if options.coverage:
-    if args:
-        print('BAD ARGS! Coverage reports run against all files.')
-        sys.exit(1)
+    coverage_dir = os.path.join(ROOT_DIR, 'var/node-coverage')
+    coverage_lcov_file = os.path.join(coverage_dir, 'lcov.info')
 
-    istanbul = os.path.join(ROOT_DIR, 'node_modules/.bin/istanbul')
-    command = [istanbul, 'cover', INDEX_JS, '--dir', 'var/node-coverage']
+    nyc = os.path.join(ROOT_DIR, 'node_modules/.bin/nyc')
+    command = [nyc, '--report-dir', coverage_dir]
+    command += ['--temp-directory', coverage_dir, '-r=text-summary']
+    command += node_tests_cmd
+    command += ['&&', 'nyc', 'report', '-r=lcov', '-r=json']
+    command += ['>', coverage_lcov_file]
 else:
     # Normal testing, no coverage analysis.
     # Run the index.js test runner, which runs all the other tests.
-    command = ['node', '--stack-trace-limit=100', INDEX_JS] + args
+    command = node_tests_cmd
+
+print('Starting node tests...')
 
 # If we got this far, we can run the tests!
 try:
@@ -65,7 +141,81 @@ except OSError:
     print('Bad command: %s' % (command,))
     raise
 
+def check_line_coverage(fn, line_coverage, line_mapping, log=True):
+    # type: (str, Dict[Any, Any], Dict[Any, Any], bool) -> bool
+    missing_lines = []
+    for line in line_coverage:
+        if line_coverage[line] == 0:
+            actual_line = line_mapping[line]
+            missing_lines.append(str(actual_line["start"]["line"]))
+    if missing_lines:
+        if log:
+            print("ERROR: %s no longer has complete node test coverage" % (fn,))
+            print("  Lines missing coverage: %s" % (", ".join(sorted(missing_lines, key=int)),))
+            print()
+        return False
+    return True
+
+NODE_COVERAGE_PATH = 'var/node-coverage/coverage-final.json'
+
+def read_coverage() -> Any:
+    coverage_json = None
+    try:
+        with open(NODE_COVERAGE_PATH, 'r') as f:
+            coverage_json = ujson.load(f)
+    except IOError:
+        print(NODE_COVERAGE_PATH + " doesn't exist. Cannot enforce fully covered files.")
+        raise
+    return coverage_json
+
+def enforce_proper_coverage(coverage_json: Any) -> bool:
+    coverage_lost = False
+    for relative_path in enforce_fully_covered:
+        path = ROOT_DIR + "/" + relative_path
+        if not (path in coverage_json):
+            print("ERROR: %s has no node test coverage" % (relative_path,))
+            continue
+        line_coverage = coverage_json[path]['s']
+        line_mapping = coverage_json[path]['statementMap']
+        if not check_line_coverage(relative_path, line_coverage, line_mapping):
+            coverage_lost = True
+    if coverage_lost:
+        print()
+        print("It looks like your changes lost 100% test coverage in one or more files.")
+        print("Usually, the right fix for this is to add some tests.")
+        print("But also check out the include/exclude lists in `tools/test-js-with-node`.")
+        print("To run this check locally, use `test-js-with-node --coverage`.")
+
+    coverage_not_enforced = False
+    for path in coverage_json:
+        if '/static/js/' in path:
+            relative_path = os.path.relpath(path, ROOT_DIR)
+            line_coverage = coverage_json[path]['s']
+            line_mapping = coverage_json[path]['statementMap']
+            if check_line_coverage(relative_path, line_coverage, line_mapping, log=False) \
+                    and not (relative_path in enforce_fully_covered):
+                coverage_not_enforced = True
+                print("ERROR: %s has complete node test coverage and is not enforced." % (relative_path,))
+
+    if coverage_not_enforced:
+        print()
+        print("There are one or more fully covered files that are not enforced.")
+        print("Add the file(s) to enforce_fully_covered in `tools/test-js-with-node`.")
+
+    problems_encountered = (coverage_lost or coverage_not_enforced)
+    return problems_encountered
+
+if options.coverage and ret == 0:
+    if not individual_files:
+        coverage_json = read_coverage()
+        problems_encountered = enforce_proper_coverage(coverage_json)
+        if problems_encountered:
+            ret = 1
+
+print()
 if ret == 0:
+    if options.coverage:
+        print("View coverage reports at http://127.0.0.1:9991/node-coverage/index.html")
     print("Test(s) passed. SUCCESS!")
 else:
     print("FAIL - Test(s) failed")

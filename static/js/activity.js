@@ -10,11 +10,6 @@ var DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 /* Time between keep-alive pings */
 var ACTIVE_PING_INTERVAL_MS = 50 * 1000;
 
-var presence_descriptions = {
-    active: 'is active',
-    idle:   'is not active',
-};
-
 /* Keep in sync with views.py:update_active_status_backend() */
 exports.ACTIVE = "active";
 exports.IDLE = "idle";
@@ -29,49 +24,78 @@ exports.has_focus = document.hasFocus && document.hasFocus();
 // as user activity.
 exports.new_user_input = true;
 
-$("html").on("mousemove", function () {
-    exports.new_user_input = true;
-});
-
 var huddle_timestamps = new Dict();
 
-function update_count_in_dom(count_span, value_span, count) {
+exports.update_scrollbar = (function () {
+    var $user_presences = $("#user_presences");
+    var $group_pms = $("#group-pms");
+
+    return {
+        users: function () {
+            if (!$user_presences.length) {
+                $user_presences = $("#user_presences");
+            }
+            ui.update_scrollbar($user_presences);
+        },
+        group_pms: function () {
+            if (!$group_pms.length) {
+                $group_pms = $("#group-pms");
+            }
+            ui.update_scrollbar($group_pms);
+        },
+    };
+}());
+
+function update_pm_count_in_dom(count_span, value_span, count) {
+    var li = count_span.parent();
+
     if (count === 0) {
         count_span.hide();
-        if (count_span.parent().hasClass("user_sidebar_entry")) {
-            count_span.parent(".user_sidebar_entry").removeClass("user-with-count");
-        } else if (count_span.parent().hasClass("group-pms-sidebar-entry")) {
-            count_span.parent(".group-pms-sidebar-entry").removeClass("group-with-count");
-        }
+        li.removeClass("user-with-count");
         value_span.text('');
         return;
     }
 
     count_span.show();
-
-    if (count_span.parent().hasClass("user_sidebar_entry")) {
-        count_span.parent(".user_sidebar_entry").addClass("user-with-count");
-    } else if (count_span.parent().hasClass("group-pms-sidebar-entry")) {
-        count_span.parent(".group-pms-sidebar-entry").addClass("group-with-count");
-    }
+    li.addClass("user-with-count");
     value_span.text(count);
 }
 
-function get_user_list_item(user_id) {
-    return $("li.user_sidebar_entry[data-user-id='" + user_id + "']");
+function update_group_count_in_dom(count_span, value_span, count) {
+    var li = count_span.parent();
+
+    if (count === 0) {
+        count_span.hide();
+        li.removeClass("group-with-count");
+        value_span.text('');
+        return;
+    }
+
+    count_span.show();
+    li.addClass("group-with-count");
+    value_span.text(count);
 }
 
-function get_filter_li(user_ids_string) {
-    if (user_ids_string.indexOf(",") < 0) {
-        return  get_user_list_item(user_ids_string);
-    }
+function get_pm_list_item(user_id) {
+    return buddy_list.find_li({
+        key: user_id,
+    });
+}
+
+function get_group_list_item(user_ids_string) {
     return $("li.group-pms-sidebar-entry[data-user-ids='" + user_ids_string + "']");
 }
 
-function set_count(user_ids_string, count) {
-    var count_span = get_filter_li(user_ids_string).find('.count');
+function set_pm_count(user_ids_string, count) {
+    var count_span = get_pm_list_item(user_ids_string).find('.count');
     var value_span = count_span.find('.value');
-    update_count_in_dom(count_span, value_span, count);
+    update_pm_count_in_dom(count_span, value_span, count);
+}
+
+function set_group_count(user_ids_string, count) {
+    var count_span = get_group_list_item(user_ids_string).find('.count');
+    var value_span = count_span.find('.value');
+    update_group_count_in_dom(count_span, value_span, count);
 }
 
 exports.update_dom_with_unread_counts = function (counts) {
@@ -80,7 +104,12 @@ exports.update_dom_with_unread_counts = function (counts) {
 
     counts.pm_count.each(function (count, user_ids_string) {
         // TODO: just use user_ids_string in our markup
-        set_count(user_ids_string, count);
+        var is_pm = user_ids_string.indexOf(',') < 0;
+        if (is_pm) {
+            set_pm_count(user_ids_string, count);
+        } else {
+            set_group_count(user_ids_string, count);
+        }
     });
 };
 
@@ -153,54 +182,18 @@ exports.huddle_fraction_present = function (huddle) {
 
     var num_present = 0;
     _.each(user_ids, function (user_id) {
-        if (presence.is_not_offline(user_id)) {
+        if (presence.is_active(user_id)) {
             num_present += 1;
         }
     });
 
-    var ratio = num_present / user_ids.length;
-
-    return ratio.toFixed(2);
+    if (num_present === user_ids.length) {
+        return 1;
+    } else if (num_present !== 0) {
+        return 0.5;
+    }
+    return false;
 };
-
-function compare_function(a, b) {
-
-    function level(status) {
-        switch (status) {
-            case 'active':
-                return 1;
-            case 'idle':
-                return 2;
-            default:
-                return 3;
-        }
-    }
-
-    var level_a = level(presence.get_status(a));
-    var level_b = level(presence.get_status(b));
-    var diff = level_a - level_b;
-    if (diff !== 0) {
-        return diff;
-    }
-
-    // Sort equivalent PM names alphabetically
-    var person_a = people.get_person_from_user_id(a);
-    var person_b = people.get_person_from_user_id(b);
-
-    var full_name_a = person_a ? person_a.full_name : '';
-    var full_name_b = person_b ? person_b.full_name : '';
-
-    return util.strcmp(full_name_a, full_name_b);
-}
-
-function sort_users(user_ids) {
-    // TODO sort by unread count first, once we support that
-    user_ids.sort(compare_function);
-    return user_ids;
-}
-
-// for testing:
-exports._sort_users = sort_users;
 
 function focus_lost() {
     // When we become idle, we don't immediately send anything to the
@@ -209,103 +202,30 @@ function focus_lost() {
     exports.has_focus = false;
 }
 
-function filter_user_ids(user_ids) {
-    var user_list = $(".user-list-filter");
-    if (user_list.length === 0) {
-        // We may have received an activity ping response after
-        // initiating a reload, in which case the user list may no
-        // longer be available.
-        // Return user list: useful for testing user list performance fix
-        return user_ids;
-    }
-
-    var search_term = user_list.expectOne().val().trim();
-    if (search_term === '') {
-        return user_ids;
-    }
-
-    var search_terms = search_term.toLowerCase().split(",");
-    search_terms = _.map(search_terms, function (s) {
-        return s.trim();
-    });
-
-    var persons = _.map(user_ids, function (user_id) {
-        return people.get_person_from_user_id(user_id);
-    });
-
-    var user_id_dict = people.filter_people_by_search_terms(persons, search_terms);
-    return user_id_dict.keys();
-}
-
-function matches_filter(user_id) {
-    // This is a roundabout way of checking a user if you look
-    // too hard at it, but it should be fine for now.
-    return (filter_user_ids([user_id]).length === 1);
-}
-
-function filter_and_sort(user_ids) {
-    user_ids = filter_user_ids(user_ids);
-    user_ids = sort_users(user_ids);
-    return user_ids;
-}
-
-exports._filter_and_sort = filter_and_sort;
-
-function get_num_unread(user_id) {
-    if (unread.suppress_unread_counts) {
-        return 0;
-    }
-    return unread.num_unread_for_person(user_id);
-}
-
-function info_for(user_id) {
-    var status = presence.get_status(user_id);
-    var person = people.get_person_from_user_id(user_id);
-    return {
-        href: narrow.pm_with_uri(person.email),
-        name: person.full_name,
-        user_id: user_id,
-        num_unread: get_num_unread(user_id),
-        type: status,
-        type_desc: presence_descriptions[status],
-        mobile: presence.get_mobile(user_id),
-    };
-}
-
 exports.insert_user_into_list = function (user_id) {
     if (page_params.realm_presence_disabled) {
         return;
     }
 
-    if (!matches_filter(user_id)) {
+    var filter_text = exports.get_filter_text();
+
+    if (!buddy_data.matches_filter(filter_text, user_id)) {
         return;
     }
 
-    var info = info_for(user_id);
-    $('#user_presences').find('[data-user-id="' + user_id + '"]').remove();
-    var html = templates.render('user_presence_row', info);
+    var info = buddy_data.get_item(user_id);
 
-    var items = $('#user_presences li').toArray();
+    buddy_list.insert_or_move({
+        key: user_id,
+        item: info,
+        compare_function: buddy_data.compare_function,
+    });
 
-    function insert() {
-        var i = 0;
+    exports.update_scrollbar.users();
+};
 
-        for (i = 0; i < items.length; i += 1) {
-            var li = $(items[i]);
-            var list_user_id = li.attr('data-user-id');
-            if (compare_function(user_id, list_user_id) < 0) {
-                li.before(html);
-                return;
-            }
-        }
-
-        $('#user_presences').append(html);
-    }
-
-    insert();
-
-    var elt = get_user_list_item(user_id);
-    compose_fade.update_one_user_row(elt);
+exports.searching = function () {
+    return exports.user_filter && exports.user_filter.searching();
 };
 
 exports.build_user_sidebar = function () {
@@ -313,26 +233,25 @@ exports.build_user_sidebar = function () {
         return;
     }
 
-    var user_ids = filter_and_sort(presence.get_user_ids());
+    var filter_text = exports.get_filter_text();
 
-    var user_info = _.map(user_ids, info_for);
-    var html = templates.render('user_presence_rows', {users: user_info});
-    $('#user_presences').html(html);
+    var user_info = buddy_data.get_items(filter_text);
 
-    // Update user fading, if necessary.
-    compose_fade.update_faded_users();
+    buddy_list.populate({
+        items: user_info,
+    });
 
     resize.resize_page_components();
 
     return user_info; // for testing
 };
 
-function actually_update_users_for_search() {
+function do_update_users_for_search() {
     exports.build_user_sidebar();
-    resize.resize_page_components();
+    exports.user_cursor.reset();
 }
 
-var update_users_for_search = _.throttle(actually_update_users_for_search, 50);
+var update_users_for_search = _.throttle(do_update_users_for_search, 50);
 
 function show_huddles() {
     $('#group-pm-list').addClass("show");
@@ -369,14 +288,18 @@ exports.update_huddles = function () {
 
     _.each(huddles, function (user_ids_string) {
         var count = unread.num_unread_for_person(user_ids_string);
-        set_count(user_ids_string, count);
+        set_group_count(user_ids_string, count);
     });
 
     show_huddles();
+    exports.update_scrollbar.group_pms();
 };
 
-
 function focus_ping(want_redraw) {
+    if (reload.is_in_progress()) {
+        blueslip.log("Skipping querying presence because reload in progress");
+        return;
+    }
     channel.post({
         url: '/json/users/me/presence',
         data: {status: (exports.has_focus) ? exports.ACTIVE : exports.IDLE,
@@ -409,8 +332,7 @@ function focus_ping(want_redraw) {
 
             if (want_redraw) {
                 presence.set_info(data.presences, data.server_timestamp);
-                exports.build_user_sidebar();
-                exports.update_huddles();
+                exports.redraw();
             }
         },
     });
@@ -424,15 +346,21 @@ function focus_gained() {
 }
 
 exports.initialize = function () {
+    $("html").on("mousemove", function () {
+        exports.new_user_input = true;
+    });
+
     $(window).focus(focus_gained);
     $(window).idle({idle: DEFAULT_IDLE_TIMEOUT_MS,
-                onIdle: focus_lost,
-                onActive: focus_gained,
-                keepTracking: true});
+                    onIdle: focus_lost,
+                    onActive: focus_gained,
+                    keepTracking: true});
 
     presence.set_info(page_params.presences,
                       page_params.initial_servertime);
     delete page_params.presences;
+
+    exports.set_cursor_and_filter();
 
     exports.build_user_sidebar();
     exports.update_huddles();
@@ -446,6 +374,9 @@ exports.initialize = function () {
     }
 
     setInterval(get_full_presence_list_update, ACTIVE_PING_INTERVAL_MS);
+
+    ui.set_up_scrollbar($("#user_presences"));
+    ui.set_up_scrollbar($("#group-pms"));
 };
 
 exports.set_user_status = function (email, info, server_time) {
@@ -466,90 +397,98 @@ exports.set_user_status = function (email, info, server_time) {
 
 exports.redraw = function () {
     exports.build_user_sidebar();
+    exports.user_cursor.redraw();
     exports.update_huddles();
 };
 
-exports.searching = function () {
-    return $('.user-list-filter').expectOne().is(':focus');
+exports.reset_users = function () {
+    // Call this when we're leaving the search widget.
+    exports.build_user_sidebar();
+    exports.user_cursor.clear();
 };
 
-function update_clear_search_button() {
-    var focused = $('.user-list-filter').is(':focus');
+exports.narrow_for_user = function (opts) {
+    var user_id = buddy_list.get_key_from_li({li: opts.li});
+    return exports.narrow_for_user_id({user_id: user_id});
+};
 
-    // Show button iff the search input is focused, or has non-empty contents
-    if (focused || $('.user-list-filter').val()) {
-        $('#clear_search_people_button').removeAttr('disabled');
-    } else {
-        $('#clear_search_people_button').attr('disabled', 'disabled');
-    }
-}
+exports.narrow_for_user_id = function (opts) {
+    var person = people.get_person_from_user_id(opts.user_id);
+    var email = person.email;
 
-exports.escape_search = function () {
-    var filter = $('.user-list-filter').expectOne();
-    if (filter.val() === '') {
-        filter.blur();
+    narrow.by('pm-with', email, {trigger: 'sidebar'});
+    exports.user_filter.clear_and_hide_search();
+};
+
+function keydown_enter_key() {
+    var user_id = exports.user_cursor.get_key();
+    if (user_id === undefined) {
         return;
     }
-    filter.val('');
-    update_clear_search_button();
-    update_users_for_search();
+
+    exports.narrow_for_user_id({user_id: user_id});
+    popovers.hide_all();
+}
+
+exports.set_cursor_and_filter = function () {
+    exports.user_cursor = list_cursor({
+        list: buddy_list,
+        highlight_class: 'highlighted_user',
+    });
+
+    exports.user_filter = user_search({
+        update_list: update_users_for_search,
+        reset_items: exports.reset_users,
+        on_focus: exports.user_cursor.reset,
+    });
+
+    var $input = exports.user_filter.input_field();
+
+    $input.on('blur', exports.user_cursor.clear);
+
+    keydown_util.handle({
+        elem: $input,
+        handlers: {
+            enter_key: function () {
+                keydown_enter_key();
+                return true;
+            },
+            up_arrow: function () {
+                exports.user_cursor.prev();
+                return true;
+            },
+            down_arrow: function () {
+                exports.user_cursor.next();
+                return true;
+            },
+        },
+    });
 };
 
 exports.initiate_search = function () {
-    var filter = $('.user-list-filter').expectOne();
-    filter.focus();
-};
-
-exports.blur_search = function () {
-    $('.user-list-filter').blur();
-    update_clear_search_button();
-};
-
-exports.clear_search = function () {
-    $('.user-list-filter').val('');
-    $('.user-list-filter').blur();
-    update_clear_search_button();
-    update_users_for_search();
-};
-
-function maybe_select_person(e) {
-    if (e.keyCode === 13) {
-        // Enter key was pressed
-
-        // Prevent a newline from being entered into the soon-to-be-opened composebox
-        e.preventDefault();
-        e.stopPropagation();
-
-        var topPerson = $('#user_presences li.user_sidebar_entry').first().attr('data-user-id');
-        var user_list = $(".user-list-filter");
-        var search_term = user_list.expectOne().val().trim();
-        if ((topPerson !== undefined) && (search_term !== '')) {
-            // undefined if there are no results
-            var email = people.get_person_from_user_id(topPerson).email;
-            narrow.by('pm-with', email, {select_first_unread: true, trigger: 'user sidebar'});
-            compose_actions.start('private', {
-                trigger: 'sidebar enter key',
-                private_message_recipient: email});
-        }
-        // Clear the user filter
-        exports.escape_search();
+    if (exports.user_filter) {
+        exports.user_filter.initiate_search();
     }
-}
+};
 
-function focus_user_filter(e) {
-    e.stopPropagation();
-    update_clear_search_button();
-}
+exports.escape_search = function () {
+    if (exports.user_filter) {
+        exports.user_filter.escape_search();
+    }
+};
 
-$(function () {
-    $(".user-list-filter").expectOne()
-        .on('click', focus_user_filter)
-        .on('input', update_users_for_search)
-        .on('keydown', maybe_select_person)
-        .on('blur', update_clear_search_button);
-    $('#clear_search_people_button').on('click', exports.clear_search);
-});
+exports.get_filter_text = function () {
+    if (!exports.user_filter) {
+        // This may be overly defensive, but there may be
+        // situations where get called before everything is
+        // fully initialized.  The empty string is a fine
+        // default here.
+        blueslip.warn('get_filter_text() is called before initialization');
+        return '';
+    }
 
+    return exports.user_filter.text();
+};
 
 return exports;
 

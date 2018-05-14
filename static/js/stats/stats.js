@@ -1,22 +1,18 @@
 var font_14pt = {
-    family: 'Humbug',
+    family: 'Source Sans Pro',
     size: 14,
     color: '#000000',
 };
-var button_selected = '#D8D8D8';
-var button_unselected = '#F0F0F0';
+
 var last_full_update = Math.min();
 
 // TODO: should take a dict of arrays and do it for all keys
 function partial_sums(array) {
-    var count = 0;
-    var cumulative = [];
-
-    for (var i = 0; i < array.length; i += 1) {
-        count += array[i];
-        cumulative[i] = count;
-    }
-    return cumulative;
+    var accumulator = 0;
+    return array.map(function (o) {
+        accumulator += o;
+        return accumulator;
+    });
 }
 
 // Assumes date is a round number of hours
@@ -34,24 +30,29 @@ function floor_to_local_week(date) {
 }
 
 function format_date(date, include_hour) {
-    var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var months = [
+        i18n.t('January'),
+        i18n.t('February'),
+        i18n.t('March'),
+        i18n.t('April'),
+        i18n.t('May'),
+        i18n.t('June'),
+        i18n.t('July'),
+        i18n.t('August'),
+        i18n.t('September'),
+        i18n.t('October'),
+        i18n.t('November'),
+        i18n.t('December'),
+    ];
     var month_str = months[date.getMonth()];
     var year = date.getFullYear();
     var day = date.getDate();
     if (include_hour) {
         var hour = date.getHours();
-        var hour_str;
-        if (hour === 0) {
-            hour_str = '12 AM';
-        } else if (hour === 12) {
-            hour_str = '12 PM';
-        } else if (hour < 12) {
-            hour_str = hour + ' AM';
-        } else {
-            hour_str = (hour-12) + ' PM';
-        }
-        return month_str + ' ' + day + ', ' + hour_str;
+
+        var str = hour >= 12 ? "PM" : "AM";
+
+        return month_str + " " + day + ", " + (hour % 12) + ":00" + str;
     }
     return month_str + ' ' + day + ', ' + year;
 }
@@ -70,7 +71,7 @@ function update_last_full_update(end_times) {
     $('#id_last_full_update').closest('.last-update').show();
 }
 
-$(document).ready(function () {
+$(function () {
     $('span[data-toggle="tooltip"]').tooltip({
         animation: false,
         placement: 'top',
@@ -81,6 +82,29 @@ $(document).ready(function () {
         $('span[data-toggle="tooltip"]').tooltip('toggle');
     });
 });
+
+
+function get_chart_data(data, callback) {
+    var url;
+    if (page_params.is_staff) {
+        url = '/json/analytics/chart_data/realm/' + page_params.stats_realm;
+    } else {
+        url = '/json/analytics/chart_data';
+    }
+
+    $.get({
+        url: url,
+        data: data,
+        idempotent: true,
+        success: function (data) {
+            callback(data);
+            update_last_full_update(data.end_times);
+        },
+        error: function (xhr) {
+            $('#id_stats_errors').show().text(JSON.parse(xhr.responseText).msg);
+        },
+    });
+}
 
 function populate_messages_sent_over_time(data) {
     if (data.end_times.length === 0) {
@@ -96,11 +120,11 @@ function populate_messages_sent_over_time(data) {
         var common = { x: dates, type: type, hoverinfo: 'none', text: text };
         return {
             human: $.extend({ // 5062a0
-                name: "Humans", y: values.human, marker: {color: '#5f6ea0'}}, common),
+                name: i18n.t("Humans"), y: values.human, marker: {color: '#5f6ea0'}}, common),
             bot: $.extend({ // a09b5f bbb56e
-                name: "Bots", y: values.bot, marker: {color: '#b7b867'}}, common),
+                name: i18n.t("Bots"), y: values.bot, marker: {color: '#b7b867'}}, common),
             me: $.extend({
-                name: "Me", y: values.me, marker: {color: '#be6d68'}}, common),
+                name: i18n.t("Me"), y: values.me, marker: {color: '#be6d68'}}, common),
         };
     }
 
@@ -122,27 +146,26 @@ function populate_messages_sent_over_time(data) {
     };
 
     function make_rangeselector(x, y, button1, button2) {
-        return { x: x, y: y,
-                 buttons: [$.extend({stepmode: 'backward'}, button1),
-                           $.extend({stepmode: 'backward'}, button2),
-                           {step: 'all', label: 'All time'}] };
+        return {x: x, y: y,
+                buttons: [
+                    $.extend({stepmode: 'backward'}, button1),
+                    $.extend({stepmode: 'backward'}, button2),
+                    {step: 'all', label: 'All time'}]};
     }
-    var hourly_rangeselector = make_rangeselector(
-        0.66, -0.62,
-        {count: 24, label: 'Last 24 Hours', step: 'hour'},
-        {count: 72, label: 'Last 72 Hours', step: 'hour'});
+
     // This is also the cumulative rangeselector
     var daily_rangeselector = make_rangeselector(
         0.68, -0.62,
-        {count: 10, label: 'Last 10 Days', step: 'day'},
-        {count: 30, label: 'Last 30 Days', step: 'day'});
+        {count: 10, label: i18n.t('Last 10 days'), step: 'day'},
+        {count: 30, label: i18n.t('Last 30 days'), step: 'day'});
     var weekly_rangeselector = make_rangeselector(
         0.656, -0.62,
-        {count: 2, label: 'Last 2 Months', step: 'month'},
-        {count: 6, label: 'Last 6 Months', step: 'month'});
+        {count: 2, label: i18n.t('Last 2 months'), step: 'month'},
+        {count: 6, label: i18n.t('Last 6 months'), step: 'month'});
 
     function add_hover_handler() {
         document.getElementById('id_messages_sent_over_time').on('plotly_hover', function (data) {
+            $("#hoverinfo").show();
             document.getElementById('hover_date').innerText =
                 data.points[0].data.text[data.points[0].pointNumber];
             var values = [null, null, null];
@@ -217,7 +240,6 @@ function populate_messages_sent_over_time(data) {
         return format_date(date, true);
     };
     var values = {me: data.user.human, human: data.realm.human, bot: data.realm.bot};
-    var hourly_traces = make_traces(start_dates, values, 'bar', date_formatter);
 
     var info = aggregate_data('day');
     date_formatter = function (date) {
@@ -228,8 +250,7 @@ function populate_messages_sent_over_time(data) {
 
     info = aggregate_data('week');
     date_formatter = function (date) {
-        // return i18n.t("Week of __date__", {date: format_date(date, false)});
-        return "Week of " + format_date(date, false);
+        return i18n.t("Week of __date__", {date: format_date(date, false)});
     };
     var last_week_is_partial = info.last_value_is_partial;
     var weekly_traces = make_traces(info.dates, info.values, 'bar', date_formatter);
@@ -238,7 +259,7 @@ function populate_messages_sent_over_time(data) {
         return new Date(timestamp*1000);
     });
     values = {human: partial_sums(data.realm.human), bot: partial_sums(data.realm.bot),
-        me: partial_sums(data.user.human)};
+              me: partial_sums(data.user.human)};
     date_formatter = function (date) {
         return format_date(date, true);
     };
@@ -251,10 +272,8 @@ function populate_messages_sent_over_time(data) {
     var clicked_cumulative = false;
 
     function draw_or_update_plot(rangeselector, traces, last_value_is_partial, initial_draw) {
-        $('#daily_button').css('background', button_unselected);
-        $('#weekly_button').css('background', button_unselected);
-        $('#hourly_button').css('background', button_unselected);
-        $('#cumulative_button').css('background', button_unselected);
+        $('#daily_button, #weekly_button, #cumulative_button').removeClass("selected");
+        $('#id_messages_sent_over_time > div').removeClass("spinner");
         if (initial_draw) {
             traces.human.visible = true;
             traces.bot.visible = 'legendonly';
@@ -279,53 +298,39 @@ function populate_messages_sent_over_time(data) {
     }
 
     // Click handlers for aggregation buttons
-    $('#hourly_button').click(function () {
-        draw_or_update_plot(hourly_rangeselector, hourly_traces, false, false);
-        $(this).css('background', button_selected);
-        clicked_cumulative = false;
-    });
-
     $('#daily_button').click(function () {
         draw_or_update_plot(daily_rangeselector, daily_traces, last_day_is_partial, false);
-        $(this).css('background', button_selected);
+        $(this).addClass("selected");
         clicked_cumulative = false;
     });
 
     $('#weekly_button').click(function () {
         draw_or_update_plot(weekly_rangeselector, weekly_traces, last_week_is_partial, false);
-        $(this).css('background', button_selected);
+        $(this).addClass("selected");
         clicked_cumulative = false;
     });
 
     $('#cumulative_button').click(function () {
         clicked_cumulative = false;
         draw_or_update_plot(daily_rangeselector, cumulative_traces, false, false);
-        $(this).css('background', button_selected);
+        $(this).addClass("selected");
         clicked_cumulative = true;
     });
 
     // Initial drawing of plot
     if (weekly_traces.human.x.length < 12) {
         draw_or_update_plot(daily_rangeselector, daily_traces, last_day_is_partial, true);
-        $('#daily_button').css('background', button_selected);
+        $('#daily_button').addClass("selected");
     } else {
         draw_or_update_plot(weekly_rangeselector, weekly_traces, last_week_is_partial, true);
-        $('#weekly_button').css('background', button_selected);
+        $('#weekly_button').addClass("selected");
     }
 }
 
-$.get({
-    url: '/json/analytics/chart_data',
-    data: {chart_name: 'messages_sent_over_time', min_length: '10'},
-    idempotent: true,
-    success: function (data) {
-        populate_messages_sent_over_time(data);
-        update_last_full_update(data.end_times);
-    },
-    error: function (xhr) {
-        $('#id_stats_errors').show().text($.parseJSON(xhr.responseText).msg);
-    },
-});
+get_chart_data(
+    {chart_name: 'messages_sent_over_time', min_length: '10'},
+    populate_messages_sent_over_time
+);
 
 function round_to_percentages(values, total) {
     return values.map(function (x) {
@@ -336,8 +341,15 @@ function round_to_percentages(values, total) {
             return '0%';
         }
         var unrounded = x/total*100;
-        var precision = Math.min(6, Math.max(2, Math.floor(
-                -Math.log(100-unrounded)/Math.log(10)) + 3));
+
+        var precision = Math.min(
+            6, // this is the max precision (two #, 4 decimal points; 99.9999%).
+            Math.max(
+                2, // the minimum amount of precision (40% or 6.0%).
+                Math.floor(-Math.log10(100 - unrounded)) + 3
+            )
+        );
+
         return unrounded.toPrecision(precision) + '%';
     });
 }
@@ -347,6 +359,9 @@ function compute_summary_chart_data(time_series_data, num_steps, labels_) {
     var data = {};
     var key;
     for (key in time_series_data) {
+        if (!time_series_data.hasOwnProperty(key)) {
+            continue;
+        }
         if (time_series_data[key].length < num_steps) {
             num_steps = time_series_data[key].length;
         }
@@ -412,7 +427,7 @@ function populate_messages_sent_by_client(data) {
         plot_data.values.reverse();
         plot_data.labels.reverse();
         plot_data.percentages.reverse();
-        var annotations = { values : [],  labels : [],  text : []};
+        var annotations = {values: [], labels: [], text: []};
         for (var i=0; i<plot_data.values.length; i+=1) {
             if (plot_data.values[i] > 0) {
                 annotations.values.push(plot_data.values[i]);
@@ -430,7 +445,7 @@ function populate_messages_sent_by_client(data) {
                 textinfo: "text",
                 hoverinfo: "none",
                 marker: { color: '#537c5e' },
-                font: { family: 'Humbug', size: 18, color: '#000000' },
+                font: { family: 'Source Sans Pro', size: 18, color: '#000000' },
             },
             trace_annotations: {
                 x: annotations.values,
@@ -462,28 +477,24 @@ function populate_messages_sent_by_client(data) {
     var time_button;
     if (data.end_times.length >= 30) {
         time_button = 'month';
-        $('#messages_by_client_last_month_button').css('background', button_selected);
+        $('#messages_by_client_last_month_button').addClass("selected");
     } else {
         time_button = 'cumulative';
-        $('#messages_by_client_cumulative_button').css('background', button_selected);
-    }
-
-    function remove_button(button_id) {
-        var elem = document.getElementById(button_id);
-        elem.parentNode.removeChild(elem);
+        $('#messages_by_client_cumulative_button').addClass("selected");
     }
 
     if (data.end_times.length < 365) {
-        remove_button('messages_by_client_last_year_button');
+        $("#pie_messages_sent_by_client button[data-time='year']").remove();
         if (data.end_times.length < 30) {
-            remove_button('messages_by_client_last_month_button');
+            $("#pie_messages_sent_by_client button[data-time='month']").remove();
             if (data.end_times.length < 7) {
-                remove_button('messages_by_client_last_week_button');
+                $("#pie_messages_sent_by_client button[data-time='week']").remove();
             }
         }
     }
 
     function draw_plot() {
+        $('#id_messages_sent_by_client > div').removeClass("spinner");
         var data_ = plot_data[user_button][time_button];
         layout.height = layout.margin.b + data_.trace.x.length * 30;
         layout.xaxis.range = [0, Math.max.apply(null, data_.trace.x) * 1.3];
@@ -497,52 +508,24 @@ function populate_messages_sent_by_client(data) {
 
     // Click handlers
     function set_user_button(button) {
-        $('#messages_by_client_realm_button').css('background', button_unselected);
-        $('#messages_by_client_user_button').css('background', button_unselected);
-        button.css('background', button_selected);
+        $("#pie_messages_sent_by_client button[data-user]").removeClass("selected");
+        button.addClass("selected");
     }
 
     function set_time_button(button) {
-        $('#messages_by_client_cumulative_button').css('background', button_unselected);
-        $('#messages_by_client_last_year_button').css('background', button_unselected);
-        $('#messages_by_client_last_month_button').css('background', button_unselected);
-        $('#messages_by_client_last_week_button').css('background', button_unselected);
-        button.css('background', button_selected);
+        $("#pie_messages_sent_by_client button[data-time]").removeClass("selected");
+        button.addClass("selected");
     }
 
-    $('#messages_by_client_realm_button').click(function () {
-        set_user_button($(this));
-        user_button = 'realm';
-        draw_plot();
-    });
-
-    $('#messages_by_client_user_button').click(function () {
-        set_user_button($(this));
-        user_button = 'user';
-        draw_plot();
-    });
-
-    $('#messages_by_client_cumulative_button').click(function () {
-        set_time_button($(this));
-        time_button = 'cumulative';
-        draw_plot();
-    });
-
-    $('#messages_by_client_last_year_button').click(function () {
-        set_time_button($(this));
-        time_button = 'year';
-        draw_plot();
-    });
-
-    $('#messages_by_client_last_month_button').click(function () {
-        set_time_button($(this));
-        time_button = 'month';
-        draw_plot();
-    });
-
-    $('#messages_by_client_last_week_button').click(function () {
-        set_time_button($(this));
-        time_button = 'week';
+    $("#pie_messages_sent_by_client button").click(function () {
+        if ($(this).attr("data-user")) {
+            set_user_button($(this));
+            user_button = $(this).attr("data-user");
+        }
+        if ($(this).attr("data-time")) {
+            set_time_button($(this));
+            time_button = $(this).attr("data-time");
+        }
         draw_plot();
     });
 
@@ -562,23 +545,15 @@ function populate_messages_sent_by_client(data) {
     });
 }
 
-$.get({
-    url: '/json/analytics/chart_data',
-    data: {chart_name: 'messages_sent_by_client', min_length: '10'},
-    idempotent: true,
-    success: function (data) {
-        populate_messages_sent_by_client(data);
-        update_last_full_update(data.end_times);
-    },
-    error: function (xhr) {
-        $('#id_stats_errors').show().text($.parseJSON(xhr.responseText).msg);
-    },
-});
+get_chart_data(
+    {chart_name: 'messages_sent_by_client', min_length: '10'},
+    populate_messages_sent_by_client
+);
 
 function populate_messages_sent_by_message_type(data) {
     var layout = {
         margin: { l: 90, r: 0, b: 0, t: 0 },
-        width: 550,
+        width: 750,
         height: 300,
         font: font_14pt,
     };
@@ -605,7 +580,7 @@ function populate_messages_sent_by_message_type(data) {
                     colors: ['#68537c', '#be6d68', '#b3b348'],
                 },
             },
-            total_str: "Total messages: " + plot_data.total.toString().
+            total_str: "<b>Total messages:</b> " + plot_data.total.toString().
                 replace(/\B(?=(\d{3})+(?!\d))/g, ","),
         };
     }
@@ -629,29 +604,25 @@ function populate_messages_sent_by_message_type(data) {
     var time_button;
     if (data.end_times.length >= 30) {
         time_button = 'month';
-        $('#messages_by_type_last_month_button').css('background', button_selected);
+        $('#messages_by_type_last_month_button').addClass("selected");
     } else {
         time_button = 'cumulative';
-        $('#messages_by_type_cumulative_button').css('background', button_selected);
+        $('#messages_by_type_cumulative_button').addClass("selected");
     }
     var totaldiv = document.getElementById('pie_messages_sent_by_type_total');
 
-    function remove_button(button_id) {
-        var elem = document.getElementById(button_id);
-        elem.parentNode.removeChild(elem);
-    }
-
     if (data.end_times.length < 365) {
-        remove_button('messages_by_type_last_year_button');
+        $("#pie_messages_sent_by_type button[data-time='year']").remove();
         if (data.end_times.length < 30) {
-            remove_button('messages_by_type_last_month_button');
+            $("#pie_messages_sent_by_type button[data-time='month']").remove();
             if (data.end_times.length < 7) {
-                remove_button('messages_by_type_last_week_button');
+                $("#pie_messages_sent_by_type button[data-time='week']").remove();
             }
         }
     }
 
     function draw_plot() {
+        $('#id_messages_sent_by_message_type > div').removeClass("spinner");
         Plotly.newPlot('id_messages_sent_by_message_type',
                        [plot_data[user_button][time_button].trace],
                        layout,
@@ -663,68 +634,32 @@ function populate_messages_sent_by_message_type(data) {
 
     // Click handlers
     function set_user_button(button) {
-        $('#messages_by_type_realm_button').css('background', button_unselected);
-        $('#messages_by_type_user_button').css('background', button_unselected);
-        button.css('background', button_selected);
+        $("#pie_messages_sent_by_type button[data-user]").removeClass("selected");
+        button.addClass("selected");
     }
 
     function set_time_button(button) {
-        $('#messages_by_type_cumulative_button').css('background', button_unselected);
-        $('#messages_by_type_last_year_button').css('background', button_unselected);
-        $('#messages_by_type_last_month_button').css('background', button_unselected);
-        $('#messages_by_type_last_week_button').css('background', button_unselected);
-        button.css('background', button_selected);
+        $("#pie_messages_sent_by_type button[data-time]").removeClass("selected");
+        button.addClass("selected");
     }
 
-    $('#messages_by_type_realm_button').click(function () {
-        set_user_button($(this));
-        user_button = 'realm';
-        draw_plot();
-    });
-
-    $('#messages_by_type_user_button').click(function () {
-        set_user_button($(this));
-        user_button = 'user';
-        draw_plot();
-    });
-
-    $('#messages_by_type_cumulative_button').click(function () {
-        set_time_button($(this));
-        time_button = 'cumulative';
-        draw_plot();
-    });
-
-    $('#messages_by_type_last_year_button').click(function () {
-        set_time_button($(this));
-        time_button = 'year';
-        draw_plot();
-    });
-
-    $('#messages_by_type_last_month_button').click(function () {
-        set_time_button($(this));
-        time_button = 'month';
-        draw_plot();
-    });
-
-    $('#messages_by_type_last_week_button').click(function () {
-        set_time_button($(this));
-        time_button = 'week';
+    $("#pie_messages_sent_by_type button").click(function () {
+        if ($(this).attr("data-user")) {
+            set_user_button($(this));
+            user_button = $(this).attr("data-user");
+        }
+        if ($(this).attr("data-time")) {
+            set_time_button($(this));
+            time_button = $(this).attr("data-time");
+        }
         draw_plot();
     });
 }
 
-$.get({
-    url: '/json/analytics/chart_data',
-    data: {chart_name: 'messages_sent_by_message_type', min_length: '10'},
-    idempotent: true,
-    success: function (data) {
-        populate_messages_sent_by_message_type(data);
-        update_last_full_update(data.end_times);
-    },
-    error: function (xhr) {
-        $('#id_stats_errors').show().text($.parseJSON(xhr.responseText).msg);
-    },
-});
+get_chart_data(
+    {chart_name: 'messages_sent_by_message_type', min_length: '10'},
+    populate_messages_sent_by_message_type
+);
 
 function populate_number_of_users(data) {
     var layout = {
@@ -737,17 +672,17 @@ function populate_number_of_users(data) {
             fixedrange: true,
             rangeselector: {
                 x: 0.808,
-                y: -0.2,
+                y: -0.33,
                 buttons: [
                     {
                         count: 30,
-                        label: 'Last 30 Days',
+                        label: i18n.t('Last 30 days'),
                         step: 'day',
                         stepmode: 'backward',
                     },
                     {
                         step: 'all',
-                        label: 'All time',
+                        label: i18n.t('All time'),
                     },
                 ],
             },
@@ -763,9 +698,7 @@ function populate_number_of_users(data) {
         return new Date(timestamp*1000);
     });
 
-    var text = end_dates.map(function (date) {
-        return format_date(date, false);
-    });
+    var text = end_dates.map(format_date);
 
     var trace = {
         x: end_dates,
@@ -777,25 +710,19 @@ function populate_number_of_users(data) {
         visible: true,
     };
 
+    $('#id_number_of_users > div').removeClass("spinner");
+
     Plotly.newPlot('id_number_of_users', [trace], layout, {displayModeBar: false});
 
     document.getElementById('id_number_of_users').on('plotly_hover', function (data) {
-        document.getElementById('users_hover_date').innerText =
-            data.points[0].data.text[data.points[0].pointNumber];
-        document.getElementById('users_hover_humans').style.display = 'inline';
-        document.getElementById('users_hover_humans_value').innerText = data.points[0].y;
+        $("#users_hover_info").show();
+        $("#users_hover_date").text(data.points[0].data.text[data.points[0].pointNumber]);
+        $("#users_hover_humans").css("display", "inline");
+        $("#users_hover_humans_value").text(data.points[0].y);
     });
 }
 
-$.get({
-    url: '/json/analytics/chart_data',
-    data: {chart_name: 'number_of_humans', min_length: '10'},
-    idempotent: true,
-    success: function (data) {
-        populate_number_of_users(data);
-        update_last_full_update(data.end_times);
-    },
-    error: function (xhr) {
-        $('#id_stats_errors').show().text($.parseJSON(xhr.responseText).msg);
-    },
-});
+get_chart_data(
+    {chart_name: 'number_of_humans', min_length: '10'},
+    populate_number_of_users
+);

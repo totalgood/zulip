@@ -28,7 +28,7 @@ exports.message_viewport_info = function () {
     var element_just_above_us = $(".floating_recipient");
 
     res.visible_top = element_just_above_us.offset().top
-        + element_just_above_us.outerHeight();
+        + element_just_above_us.safeOuterHeight();
 
     var element_just_below_us = $("#compose");
 
@@ -115,9 +115,9 @@ function in_viewport_or_tall(rect, top_of_feed, bottom_of_feed,
 }
 
 function add_to_visible(candidates, visible,
-                                 top_of_feed, bottom_of_feed,
-                                 require_fully_visible,
-                                 row_to_id) {
+                        top_of_feed, bottom_of_feed,
+                        require_fully_visible,
+                        row_to_id) {
     _.every(candidates, function (row) {
         var row_rect = row.getBoundingClientRect();
         // Mark very tall messages as read once we've gotten past them
@@ -132,7 +132,7 @@ function add_to_visible(candidates, visible,
 
 var top_of_feed = new util.CachedValue({
     compute_value: function () {
-        return $(".floating_recipient").offset().top + $(".floating_recipient").outerHeight();
+        return $(".floating_recipient").offset().top + $(".floating_recipient").safeOuterHeight();
     },
 });
 
@@ -157,11 +157,11 @@ function _visible_divs(selected_row, row_min_height, row_to_output, div_class,
     var above_pointer = selected_row.prevAll("div." + div_class + ":lt(" + num_neighbors + ")");
     var below_pointer = selected_row.nextAll("div." + div_class + ":lt(" + num_neighbors + ")");
     add_to_visible(selected_row, visible, top_of_feed.get(), bottom_of_feed.get(),
-            require_fully_visible, row_to_output);
+                   require_fully_visible, row_to_output);
     add_to_visible(above_pointer, visible, top_of_feed.get(), bottom_of_feed.get(),
-            require_fully_visible, row_to_output);
+                   require_fully_visible, row_to_output);
     add_to_visible(below_pointer, visible, top_of_feed.get(), bottom_of_feed.get(),
-            require_fully_visible, row_to_output);
+                   require_fully_visible, row_to_output);
 
     return visible;
 }
@@ -223,11 +223,6 @@ exports.scrollTop = function viewport_scrollTop(target_scrollTop) {
     return ret;
 };
 
-exports.set_message_offset = function viewport_set_message_offset(offset) {
-    var msg = current_msg_list.selected_row();
-    exports.scrollTop(exports.scrollTop() + msg.offset().top - offset);
-};
-
 function make_dimen_wrapper(dimen_name, dimen_func) {
     dimensions[dimen_name] = new util.CachedValue({
         compute_value: function () {
@@ -244,7 +239,7 @@ function make_dimen_wrapper(dimen_name, dimen_func) {
 }
 
 exports.height = make_dimen_wrapper('height', $(exports.message_pane).height);
-exports.width  = make_dimen_wrapper('width',  $(exports.message_pane).width);
+exports.width = make_dimen_wrapper('width', $(exports.message_pane).width);
 
 exports.stop_auto_scrolling = function () {
     if (in_stoppable_autoscroll) {
@@ -255,9 +250,9 @@ exports.stop_auto_scrolling = function () {
 exports.is_narrow = function () {
     // This basically returns true when we hide the right sidebar for
     // the left_side_userlist skinny mode.  It would be nice to have a less brittle
-    // test for this.  See the "@media (max-width: 975px)" section in
+    // test for this.  See the "@media (max-width: 1025px)" section in
     // zulip.css.
-    return window.innerWidth <= 975;
+    return window.innerWidth <= 1025;
 };
 
 exports.system_initiated_animate_scroll = function (scroll_amount) {
@@ -296,7 +291,7 @@ exports.recenter_view = function (message, opts) {
     var bottom_threshold = viewport_info.visible_top + viewport_info.visible_height;
 
     var message_top = message.offset().top;
-    var message_height = message.outerHeight(true);
+    var message_height = message.safeOuterHeight(true);
     var message_bottom = message_top + message_height;
 
     var is_above = message_top < top_threshold;
@@ -359,7 +354,7 @@ exports.keep_pointer_in_view = function () {
 
         // If at least part of the message is below top_threshold (10% from
         // the top), then we also leave it alone.
-        var bottom_offset = message_top + next_row.outerHeight(true);
+        var bottom_offset = message_top + next_row.safeOuterHeight(true);
         if (bottom_offset >= top_threshold) {
             return true;
         }

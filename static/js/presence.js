@@ -20,12 +20,12 @@ function is_mobile(device) {
     return MOBILE_DEVICES.indexOf(device) !== -1;
 }
 
-exports.is_not_offline = function (user_id) {
+exports.is_active = function (user_id) {
     var presence_info = exports.presence_info;
 
     if (presence_info[user_id]) {
         var status = presence_info[user_id].status;
-        if (status && (status !== 'offline')) {
+        if (status && (status === "active")) {
             return true;
         }
     }
@@ -36,11 +36,10 @@ exports.get_status = function (user_id) {
     if (user_id === page_params.user_id) {
         return "active";
     }
-    return exports.presence_info[user_id].status;
-};
-
-exports.get_mobile = function (user_id) {
-    return exports.presence_info[user_id].mobile;
+    if (user_id in exports.presence_info) {
+        return exports.presence_info[user_id].status;
+    }
+    return "offline";
 };
 
 exports.get_user_ids = function () {
@@ -63,26 +62,26 @@ function status_from_timestamp(baseline_time, info) {
         }
         if (age < OFFLINE_THRESHOLD_SECS) {
             switch (device_presence.status) {
-                case 'active':
-                    if (is_mobile(device)) {
-                        mobileAvailable = true;
-                    } else {
-                        nonmobileAvailable = true;
-                    }
+            case 'active':
+                if (is_mobile(device)) {
+                    mobileAvailable = true;
+                } else {
+                    nonmobileAvailable = true;
+                }
+                status = device_presence.status;
+                break;
+            case 'idle':
+                if (status !== 'active') {
                     status = device_presence.status;
-                    break;
-                case 'idle':
-                    if (status !== 'active') {
-                        status = device_presence.status;
-                    }
-                    break;
-                case 'offline':
-                    if (status !== 'active' && status !== 'idle') {
-                        status = device_presence.status;
-                    }
-                    break;
-                default:
-                    blueslip.error('Unexpected status', {presence_object: device_presence, device: device}, undefined);
+                }
+                break;
+            case 'offline':
+                if (status !== 'active' && status !== 'idle') {
+                    status = device_presence.status;
+                }
+                break;
+            default:
+                blueslip.error('Unexpected status', {presence_object: device_presence, device: device}, undefined);
             }
         }
     });
@@ -147,6 +146,11 @@ exports.update_info_for_small_realm = function () {
         if (presence_info[user_id]) {
             // this is normal, we have data for active
             // users that we don't want to clobber.
+            return;
+        }
+
+        if (person.is_bot) {
+            // we don't show presence for bots
             return;
         }
 

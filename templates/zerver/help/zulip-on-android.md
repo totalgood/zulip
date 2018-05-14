@@ -2,7 +2,7 @@
 
 Zulip has an Android application, compatible with Android versions 3.2 and
 higher. The app can be downloaded from the
-[Google Play Store](https://play.google.com/store/apps/details?id=com.zulip.android).
+[Google Play Store](https://play.google.com/store/apps/details?id=com.zulipmobile).
 
 ## Initial setup
 ### Connecting to a server
@@ -31,9 +31,9 @@ then press **Log in**.
 
     ![Login form](/static/images/help/android-log-in.png)
 
-* If you prefer to log in with your Google account, press the **Sign in with Google** button.
+* If you prefer to log in with your Google account, press the **Log in with Google** button.
 
-    ![Google button](/static/images/help/android-google-sign-in-button.png)
+    ![Google button](/static/images/help/android-google-login-button.png)
 
     You will be asked to choose which one do you want to use from those you have
     configured in your device.

@@ -12,7 +12,9 @@ class zulip_ops::zmirror_personals {
                        # Packages needed to build pyzephyr
                        "libzephyr-dev",
                        "comerr-dev",
+                       "python3-dev",
                        "python-dev",
+                       "cython3",
                        "cython",
                        ]
   package { $zmirror_packages: ensure => "installed" }
@@ -28,7 +30,7 @@ class zulip_ops::zmirror_personals {
   file { ['/home/zulip/api-keys', '/home/zulip/zephyr_sessions', '/home/zulip/ccache',
           '/home/zulip/mirror_status']:
     ensure     => directory,
-    mode       => 644,
+    mode       => '0644',
     owner      => "zulip",
     group      => "zulip",
   }
@@ -37,7 +39,7 @@ class zulip_ops::zmirror_personals {
     ensure => file,
     owner  => "root",
     group  => "root",
-    mode => 644,
+    mode => '0644',
     source => "puppet:///modules/zulip_ops/cron.d/test_zephyr_personal_mirrors",
   }
 
@@ -47,7 +49,7 @@ class zulip_ops::zmirror_personals {
     purge => true,
     owner => "root",
     group => "root",
-    mode => 755,
+    mode => '0755',
     source => "puppet:///modules/zulip_ops/nagios_plugins/zulip_zephyr_mirror",
   }
 

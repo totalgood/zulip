@@ -1,11 +1,8 @@
-global.stub_out_jquery();
+set_global('$', global.make_zjquery());
+set_global('document', {});
+set_global('window', {});
 
-add_dependencies({
-    util: 'js/util.js',
-});
-
-var util = global.util;
-var _ = global._;
+zrequire('util');
 
 (function test_CachedValue() {
     var x = 5;
@@ -28,6 +25,13 @@ var _ = global._;
 (function test_extract_pm_recipients() {
     assert.equal(util.extract_pm_recipients('bob@foo.com, alice@foo.com').length, 2);
     assert.equal(util.extract_pm_recipients('bob@foo.com, ').length, 1);
+}());
+
+(function test_is_pm_recipient() {
+    var message = { reply_to: 'alice@example.com,bOb@exaMple.com,fred@example.com' };
+    assert(util.is_pm_recipient('alice@example.com', message));
+    assert(util.is_pm_recipient('bob@example.com', message));
+    assert(!util.is_pm_recipient('unknown@example.com', message));
 }());
 
 (function test_rtrim() {
@@ -78,13 +82,48 @@ var _ = global._;
         {type: 'stream', stream_id: 101, subject: 'Bar'},
         {type: 'private'}));
 
+    assert(!util.same_recipient(
+        {type: 'private', to_user_ids: undefined},
+        {type: 'private'}));
+
+    assert(!util.same_recipient(
+        {type: 'unknown type'},
+        {type: 'unknown type'}));
+
+    assert(!util.same_recipient(
+        undefined,
+        {type: 'private'}));
+
+    assert(!util.same_recipient(undefined, undefined));
 }());
 
 (function test_robust_uri_decode() {
     assert.equal(util.robust_uri_decode('xxx%3Ayyy'), 'xxx:yyy');
     assert.equal(util.robust_uri_decode('xxx%3'), 'xxx');
+
+    set_global('decodeURIComponent', function () { throw 'foo'; });
+    try {
+        util.robust_uri_decode('%E0%A4%A');
+    } catch (e) {
+        assert(e, 'foo');
+    }
 }());
 
+(function test_dumb_strcmp() {
+    Intl.Collator = undefined;
+    var strcmp = util.make_strcmp();
+    assert.equal(strcmp('a', 'b'), -1);
+    assert.equal(strcmp('c', 'c'), 0);
+    assert.equal(strcmp('z', 'y'), 1);
+}());
+
+(function test_is_mobile() {
+    global.window.navigator = { userAgent: "Android" };
+    assert(util.is_mobile());
+
+    global.window.navigator = { userAgent: "Not mobile" };
+    assert(!util.is_mobile());
+}());
 
 (function test_array_compare() {
     assert(util.array_compare([], []));
@@ -114,40 +153,53 @@ var _ = global._;
 
 (function test_all_and_everyone_mentions_regexp() {
     var messages_with_all_mentions = [
-      '@all',
-      'some text before @all some text after',
-      '@all some text after only',
-      'some text before only @all',
-      '@**all**',
-      'some text before @**all** some text after',
-      '@**all** some text after only',
-      'some text before only @**all**',
+        '@**all**',
+        'some text before @**all** some text after',
+        '@**all** some text after only',
+        'some text before only @**all**',
     ];
 
     var messages_with_everyone_mentions = [
-      '@everyone',
-      'some text before @everyone some text after',
-      '@everyone some text after only',
-      'some text before only @everyone',
-      '@**everyone**',
-      'some text before @**everyone** some text after',
-      '@**everyone** some text after only',
-      'some text before only @**everyone**',
+        '@**everyone**',
+        'some text before @**everyone** some text after',
+        '@**everyone** some text after only',
+        'some text before only @**everyone**',
+    ];
+
+    var messages_with_stream_mentions = [
+        '@**stream**',
+        'some text before @**stream** some text after',
+        '@**stream** some text after only',
+        'some text before only @**stream**',
     ];
 
     var messages_without_all_mentions = [
-      '`@everyone`',
-      'some_email@everyone.com',
-      '`@**everyone**`',
-      'some_email@**everyone**.com',
+        '@all',
+        'some text before @all some text after',
+        '`@everyone`',
+        'some_email@everyone.com',
+        '`@**everyone**`',
+        'some_email@**everyone**.com',
     ];
 
     var messages_without_everyone_mentions = [
-      '`@everyone`',
-      'some_email@everyone.com',
-      '`@**everyone**`',
-      'some_email@**everyone**.com',
+        'some text before @everyone some text after',
+        '@everyone',
+        '`@everyone`',
+        'some_email@everyone.com',
+        '`@**everyone**`',
+        'some_email@**everyone**.com',
     ];
+
+    var messages_without_stream_mentions = [
+        'some text before @stream some text after',
+        '@stream',
+        '`@stream`',
+        'some_email@stream.com',
+        '`@**stream**`',
+        'some_email@**stream**.com',
+    ];
+
     var i;
     for (i=0; i<messages_with_all_mentions.length; i += 1) {
         assert(util.is_all_or_everyone_mentioned(messages_with_all_mentions[i]));
@@ -157,12 +209,20 @@ var _ = global._;
         assert(util.is_all_or_everyone_mentioned(messages_with_everyone_mentions[i]));
     }
 
+    for (i=0; i<messages_with_stream_mentions.length; i += 1) {
+        assert(util.is_all_or_everyone_mentioned(messages_with_stream_mentions[i]));
+    }
+
     for (i=0; i<messages_without_all_mentions.length; i += 1) {
         assert(!util.is_all_or_everyone_mentioned(messages_without_everyone_mentions[i]));
     }
 
     for (i=0; i<messages_without_everyone_mentions.length; i += 1) {
         assert(!util.is_all_or_everyone_mentioned(messages_without_everyone_mentions[i]));
+    }
+
+    for (i=0; i<messages_without_stream_mentions.length; i += 1) {
+        assert(!util.is_all_or_everyone_mentioned(messages_without_stream_mentions[i]));
     }
 }());
 

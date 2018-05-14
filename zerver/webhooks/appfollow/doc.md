@@ -1,24 +1,15 @@
-Receive user reviews from your tracked apps on AppFolllow in Zulip
-using the Zulip AppFollow plugin!
+Receive user reviews from your tracked apps on AppFollow
+using the Zulip AppFollow integration!
 
-First, create the stream you'd like to use for AppFollow notifications, and
-subscribe all interested parties to this stream. We recommend the
-name `appfollow`.
+1. {!create-stream.md!}
 
-Next, on your {{ settings_html|safe }}, create an AppFollow bot.
+1. {!create-bot-construct-url-indented.md!}
 
-Then, log into your account on [appfollow.io](http://appfollow.io), and:
+1. Click on the app for which you'd like to receive reviews. Click on
+   **Integrations** and go to the **Others** tab.
 
-1. Click on the app for which you'd like to receive reviews.
-   Click on **Integrations** and then go to the **Others** tab.
-   ![](/static/images/integrations/appfollow/001.png)
+1. Set **Webhook URL** to the URL constructed above. Click **Save changes**.
 
-2. In the Webhook URL field, enter the following URL, replacing the bot API key
-   and Zulip stream with the appropriate information.
-   `{{ external_api_uri_subdomain }}/v1/external/appfollow?api_key=test_api_key&stream=appfollow`
+{!congrats.md!}
 
-3. **Save changes** – all done!
-
-New reviews for your app will be delivered to your Zulip stream.
-
-![](/static/images/integrations/appfollow/002.png)
+![](/static/images/integrations/appfollow/001.png)

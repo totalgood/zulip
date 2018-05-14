@@ -1,41 +1,56 @@
 # -*- coding: utf-8 -*-
-from __future__ import absolute_import
 
 from django.http import HttpRequest, HttpResponse, HttpResponseForbidden, FileResponse, \
     HttpResponseNotFound
 from django.shortcuts import redirect
 from django.utils.translation import ugettext as _
 
-from zerver.decorator import authenticated_json_post_view
 from zerver.lib.request import has_request_variables, REQ
 from zerver.lib.response import json_success, json_error
 from zerver.lib.upload import upload_message_image_from_request, get_local_file_path, \
-    get_signed_upload_url, get_realm_for_filename, within_upload_quota
+    get_signed_upload_url, get_realm_for_filename, check_upload_within_quota
 from zerver.lib.validator import check_bool
 from zerver.models import UserProfile, validate_attachment_request
 from django.conf import settings
+from sendfile import sendfile
+from mimetypes import guess_type
 
-def serve_s3(request, url_path):
-    # type: (HttpRequest, str) -> HttpResponse
+def serve_s3(request: HttpRequest, url_path: str) -> HttpResponse:
     uri = get_signed_upload_url(url_path)
     return redirect(uri)
 
-# TODO: Rewrite this once we have django-sendfile
-def serve_local(request, path_id):
-    # type: (HttpRequest, str) -> HttpResponse
-    import os
-    import mimetypes
+def serve_local(request: HttpRequest, path_id: str) -> HttpResponse:
     local_path = get_local_file_path(path_id)
     if local_path is None:
         return HttpResponseNotFound('<p>File not found</p>')
-    filename = os.path.basename(local_path)
-    response = FileResponse(open(local_path, 'rb'),
-                            content_type = mimetypes.guess_type(filename))
-    return response
+
+    # Here we determine whether a browser should treat the file like
+    # an attachment (and thus clicking a link to it should download)
+    # or like a link (and thus clicking a link to it should display it
+    # in a browser tab).  This is controlled by the
+    # Content-Disposition header; `django-sendfile` sends the
+    # attachment-style version of that header if and only if the
+    # attachment argument is passed to it.  For attachments,
+    # django-sendfile sets the response['Content-disposition'] like
+    # this: `attachment; filename="b'zulip.txt'"; filename*=UTF-8''zulip.txt`.
+    #
+    # The "filename" field (used to name the file when downloaded) is
+    # unreliable because it doesn't have a well-defined encoding; the
+    # newer filename* field takes precedence, since it uses a
+    # consistent format (urlquoted).  For more details on filename*
+    # and filename, see the below docs:
+    # https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Disposition
+    attachment = True
+    file_type = guess_type(local_path)[0]
+    if file_type is not None and (file_type.startswith("image/") or
+                                  file_type == "application/pdf"):
+        attachment = False
+
+    return sendfile(request, local_path, attachment=attachment)
 
 @has_request_variables
-def serve_file_backend(request, user_profile, realm_id_str, filename):
-    # type: (HttpRequest, UserProfile, str, str) -> HttpResponse
+def serve_file_backend(request: HttpRequest, user_profile: UserProfile,
+                       realm_id_str: str, filename: str) -> HttpResponse:
     path_id = "%s/%s" % (realm_id_str, filename)
     is_authorized = validate_attachment_request(user_profile, path_id)
 
@@ -48,13 +63,7 @@ def serve_file_backend(request, user_profile, realm_id_str, filename):
 
     return serve_s3(request, path_id)
 
-@authenticated_json_post_view
-def json_upload_file(request, user_profile):
-    # type: (HttpRequest, UserProfile) -> HttpResponse
-    return upload_file_backend(request, user_profile)
-
-def upload_file_backend(request, user_profile):
-    # type: (HttpRequest, UserProfile) -> HttpResponse
+def upload_file_backend(request: HttpRequest, user_profile: UserProfile) -> HttpResponse:
     if len(request.FILES) == 0:
         return json_error(_("You must specify a file to upload"))
     if len(request.FILES) != 1:
@@ -65,8 +74,7 @@ def upload_file_backend(request, user_profile):
     if settings.MAX_FILE_UPLOAD_SIZE * 1024 * 1024 < file_size:
         return json_error(_("Uploaded file is larger than the allowed limit of %s MB") % (
             settings.MAX_FILE_UPLOAD_SIZE))
-    if not within_upload_quota(user_profile, file_size):
-        return json_error(_("Upload would exceed your maximum quota."))
+    check_upload_within_quota(user_profile.realm, file_size)
 
     if not isinstance(user_file.name, str):
         # It seems that in Python 2 unicode strings containing bytes are
@@ -83,7 +91,7 @@ def upload_file_backend(request, user_profile):
         # strings containing bytes and is rendered incorrectly.
         #
         # Example:
-        # >>> from six.moves import urllib
+        # >>> import urllib.parse
         # >>> name = u'%D0%97%D0%B4%D1%80%D0%B0%D0%B2%D0%B5%D0%B8%CC%86%D1%82%D0%B5.txt'
         # >>> print(urllib.parse.unquote(name))
         # ÐÐ´ÑÐ°Ð²ÐµÐ¸ÌÑÐµ  # This is wrong

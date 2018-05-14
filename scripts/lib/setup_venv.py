@@ -1,13 +1,10 @@
-from __future__ import print_function
 
 import os
-import sys
-from os.path import dirname, abspath
 import subprocess
-from scripts.lib.zulip_tools import run
+from scripts.lib.zulip_tools import run, ENDC, WARNING
 from scripts.lib.hash_reqs import expand_reqs
 
-ZULIP_PATH = dirname(dirname(dirname(abspath(__file__))))
+ZULIP_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 VENV_CACHE_PATH = "/srv/zulip-venv-cache"
 
 if 'TRAVIS' in os.environ:
@@ -22,18 +19,38 @@ VENV_DEPENDENCIES = [
     "build-essential",
     "libffi-dev",
     "libfreetype6-dev",     # Needed for image types with Pillow
-    "libz-dev",             # Needed to handle compressed PNGs with Pillow
+    "zlib1g-dev",             # Needed to handle compressed PNGs with Pillow
     "libjpeg-dev",          # Needed to handle JPEGs with Pillow
     "libldap2-dev",
     "libmemcached-dev",
     "python3-dev",          # Needed to install typed-ast dependency of mypy
     "python-dev",
+    "python3-pip",
     "python-pip",
-    "python-virtualenv",
+    "python-virtualenv",    # Trusty lacks `python3-virtualenv`.
+                            # Fortunately we don't need the library,
+                            # only the command, and this suffices.
+    "python3-six",
+    "python-six",
     "libxml2-dev",          # Used for installing talon
     "libxslt1-dev",         # Used for installing talon
     "libpq-dev",            # Needed by psycopg2
 ]
+
+THUMBOR_VENV_DEPENDENCIES = [
+    "libcurl4-openssl-dev",
+    "libjpeg-dev",
+    "zlib1g-dev",
+    "libfreetype6-dev",
+    "libpng-dev",
+    "gifsicle",
+]
+
+def install_venv_deps(requirements_file):
+    # type: (str) -> None
+    pip_requirements = os.path.join(ZULIP_PATH, "requirements", "pip.txt")
+    run(["pip", "install", "-U", "--requirement", pip_requirements])
+    run(["pip", "install", "--no-deps", "--requirement", requirements_file])
 
 def get_index_filename(venv_path):
     # type: (str) -> str
@@ -161,7 +178,7 @@ def get_logfile_name(venv_path):
 def create_log_entry(target_log, parent, copied_packages, new_packages):
     # type: (str, str, Set[str], Set[str]) -> None
 
-    venv_path = dirname(target_log)
+    venv_path = os.path.dirname(target_log)
     with open(target_log, 'a') as writer:
         writer.write("{}\n".format(venv_path))
         if copied_packages:
@@ -244,7 +261,10 @@ def do_setup_virtualenv(venv_path, requirements_file, virtualenv_args):
     activate_this = os.path.join(venv_path, "bin", "activate_this.py")
     exec(open(activate_this).read(), {}, dict(__file__=activate_this))
 
-    run(["pip", "install", "-U", "setuptools"])
-    run(["pip", "install", "--upgrade", "pip", "wheel"])
-    run(["pip", "install", "--no-deps", "--requirement", requirements_file])
+    try:
+        install_venv_deps(requirements_file)
+    except subprocess.CalledProcessError:
+        # Might be a failure due to network connection issues. Retrying...
+        print(WARNING + "`pip install` failed; retrying..." + ENDC)
+        install_venv_deps(requirements_file)
     run(["sudo", "chmod", "-R", "a+rX", venv_path])

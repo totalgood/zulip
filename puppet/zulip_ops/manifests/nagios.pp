@@ -5,14 +5,37 @@ class zulip_ops::nagios {
 
   $nagios_packages = [# Packages needed for Nagios
                       "nagios3",
+                      # For sending outgoing email
+                      "msmtp",
                       ]
   package { $nagios_packages: ensure => "installed" }
+  $nagios_format_users = join($zulip_ops::base::users, ",")
+  $nagios_alert_email = zulipconf("nagios", "alert_email", undef)
+  $nagios_test_email = zulipconf("nagios", "test_email", undef)
+  $nagios_pager_email = zulipconf("nagios", "pager_email", undef)
+
+  $nagios_mail_domain = zulipconf("nagios", "mail_domain", undef)
+  $nagios_mail_host = zulipconf("nagios", "mail_host", undef)
+  $nagios_mail_password = zulipsecret("secrets", "nagios_mail_password", "")
+  $nagios_camo_check_url = zulipconf("nagios", "camo_check_url", undef)
+
+  $hosts_domain = zulipconf("nagios", "hosts_domain", undef)
+  $hosts_zmirror = split(zulipconf("nagios", "hosts_zmirror", undef), ",")
+  $hosts_zmirrorp = split(zulipconf("nagios", "hosts_zmirrorp", undef), ",")
+  $hosts_app_prod = split(zulipconf("nagios", "hosts_app_prod", undef), ",")
+  $hosts_app_staging = split(zulipconf("nagios", "hosts_app_staging", undef), ",")
+  $hosts_postgres_primary = split(zulipconf("nagios", "hosts_postgres_primary", undef), ",")
+  $hosts_postgres_secondary = split(zulipconf("nagios", "hosts_postgres_secondary", undef), ",")
+  $hosts_redis = split(zulipconf("nagios", "hosts_redis", undef), ",")
+  $hosts_loadbalancer = split(zulipconf("nagios", "hosts_loadbalancer", undef), ",")
+  $hosts_stats = split(zulipconf("nagios", "hosts_stats", undef), ",")
+  $hosts_fullstack = split(zulipconf("nagios", "hosts_fullstack", undef), ",")
 
   apache2site { 'nagios':
+    ensure => present,
     require => [File['/etc/apache2/sites-available/'],
                 Apache2mod['headers'], Apache2mod['ssl'],
                 ],
-    ensure => present,
   }
 
   file { "/etc/nagios3/":
@@ -21,31 +44,47 @@ class zulip_ops::nagios {
     require => Package[nagios3],
     owner  => "root",
     group  => "root",
-    mode => 644,
+    mode => '0644',
     source => "puppet:///modules/zulip_ops/nagios3/",
     notify => Service["nagios3"],
   }
 
-  $nagios_format_users = join($zulip_ops::base::users, ",")
+  file { "/etc/nagios3/conf.d/contacts.cfg":
+    require => Package[nagios3],
+    owner  => "root",
+    group  => "root",
+    mode => '0644',
+    content => template("zulip_ops/nagios3/contacts.cfg.template.erb"),
+    notify => Service["nagios3"],
+  }
+  file { "/etc/nagios3/conf.d/hosts.cfg":
+    require => Package[nagios3],
+    owner  => "root",
+    group  => "root",
+    mode => '0644',
+    content => template("zulip_ops/nagios3/hosts.cfg.template.erb"),
+    notify => Service["nagios3"],
+  }
+  file { "/etc/nagios3/conf.d/localhost.cfg":
+    require => Package[nagios3],
+    owner  => "root",
+    group  => "root",
+    mode => '0644',
+    content => template("zulip_ops/nagios3/localhost.cfg.template.erb"),
+    notify => Service["nagios3"],
+  }
+
   file { "/etc/nagios3/cgi.cfg":
     require => Package[nagios3],
     owner  => "root",
     group  => "root",
-    mode => 644,
+    mode => '0644',
     content => template("zulip_ops/nagios3/cgi.cfg.template.erb"),
     notify => Service["nagios3"],
   }
 
   service { "nagios3":
     ensure => running,
-  }
-
-  file { '/usr/local/bin/pagerduty_nagios.pl':
-    ensure     => file,
-    mode       => 755,
-    owner      => "root",
-    group      => "root",
-    source     => 'puppet:///modules/zulip_ops/pagerduty_nagios.pl',
   }
 
   file { [ '/etc/nagios3/conf.d/extinfo_nagios2.cfg',
@@ -59,28 +98,30 @@ class zulip_ops::nagios {
 
   file { '/etc/nagios3/conf.d/zulip_nagios.cfg':
     ensure     => file,
-    mode       => 644,
+    mode       => '0644',
     owner      => "root",
     group      => "root",
-    source => '/root/zulip/api/integrations/nagios/zulip_nagios.cfg',
+    source => '/usr/local/share/zulip/integrations/nagios/zulip_nagios.cfg',
     notify => Service["nagios3"],
   }
 
   $hosts = $zulip_ops::base::hosts
   file { '/etc/nagios3/conf.d/zulip_autossh.cfg':
     ensure     => file,
-    mode       => 644,
+    mode       => '0644',
     owner      => "root",
     group      => "root",
     content => template('zulip_ops/nagios_autossh.template.erb'),
     notify => Service["nagios3"],
   }
-  file { '/etc/nagios3/zuliprc':
+
+  file { '/var/lib/nagios/msmtprc':
     ensure     => file,
-    mode       => 644,
-    owner      => "root",
-    group      => "root",
-    source => '/root/zulip/bots/zuliprc.nagios',
+    mode       => '0600',
+    owner      => "nagios",
+    group      => "nagios",
+    content    => template("zulip_ops/msmtprc_nagios.template.erb"),
+    require    => File['/var/lib/nagios'],
   }
 
   exec { "fix_nagios_permissions":
@@ -94,15 +135,14 @@ class zulip_ops::nagios {
     notify => Service["nagios3"],
   }
 
-  # I feel like installing this here is an abstraction violation; we
-  # should probably move this to cron.d
-  file { "/var/spool/cron/crontabs/nagios":
-    require => Package[nagios3],
-    owner  => "nagios",
-    group  => "crontab",
-    mode => 600,
-    source => "puppet:///modules/zulip_ops/nagios_crontab",
+  file { "/etc/apache2/sites-available/nagios.conf":
+    recurse => true,
+    purge => false,
+    require => Package[apache2],
+    owner  => "root",
+    group  => "root",
+    mode => '0640',
+    content => template("zulip_ops/nagios_apache_site.conf.template.erb"),
   }
-
   # TODO: Install our API
 }

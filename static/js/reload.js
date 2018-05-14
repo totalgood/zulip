@@ -1,4 +1,4 @@
-// Read https://zulip.readthedocs.io/en/latest/hashchange-system.html
+// Read https://zulip.readthedocs.io/en/latest/subsystems/hashchange-system.html
 var reload = (function () {
 
 var exports = {};
@@ -104,7 +104,7 @@ function preserve_state(send_after_reload, save_pointer, save_narrow, save_compo
 
 // Check if we're doing a compose-preserving reload.  This must be
 // done before the first call to get_events
-exports.initialize = function reload__initialize() {
+exports.initialize = function () {
     var location = window.location.toString();
     var hash_fragment = location.substring(location.indexOf('#') + 1);
 
@@ -140,13 +140,19 @@ exports.initialize = function reload__initialize() {
     if (vars.msg !== undefined) {
         var send_now = parseInt(vars.send_after_reload, 10);
 
-        // TODO: preserve focus
-        compose_actions.start(vars.msg_type, {stream: vars.stream || '',
-                                      subject: vars.subject || '',
-                                      private_message_recipient: vars.recipient || '',
-                                      content: vars.msg || ''});
-        if (send_now) {
-            compose.finish();
+        try {
+            // TODO: preserve focus
+            compose_actions.start(vars.msg_type, {stream: vars.stream || '',
+                                                  subject: vars.subject || '',
+                                                  private_message_recipient: vars.recipient || '',
+                                                  content: vars.msg || ''});
+            if (send_now) {
+                compose.finish();
+            }
+        } catch (err) {
+            // We log an error if we can't open the compose box, but otherwise
+            // we continue, since this is not critical.
+            blueslip.warn(err.toString());
         }
     }
 
@@ -175,7 +181,10 @@ exports.initialize = function reload__initialize() {
 };
 
 function do_reload_app(send_after_reload, save_pointer, save_narrow, save_compose, message) {
-    if (reload_in_progress) { return; }
+    if (reload_in_progress) {
+        blueslip.log("do_reload_app: Doing nothing since reload_in_progress");
+        return;
+    }
 
     // TODO: we should completely disable the UI here
     if (save_pointer || save_narrow || save_compose) {
@@ -195,6 +204,21 @@ function do_reload_app(send_after_reload, save_pointer, save_narrow, save_compos
     ui_report.message(message, $("#reloading-application"));
     blueslip.log('Starting server requested page reload');
     reload_in_progress = true;
+
+    // Sometimes the window.location.reload that we attempt has no
+    // immediate effect (likely by browsers trying to save power by
+    // skipping requested reloads), which can leave the Zulip app in a
+    // broken state and cause lots of confusing tracebacks.  So, we
+    // set ourselves to try reloading a bit later, both periodically
+    // and when the user focuses the window.
+    $(window).on('focus', function () {
+        blueslip.log("Retrying on-focus page reload");
+        window.location.reload(true);
+    });
+    setInterval(function () {
+        blueslip.log("Retrying page reload due to 30s timer");
+        window.location.reload(true);
+    }, 30000);
 
     try {
         server_events.cleanup_event_queue();
@@ -290,6 +314,7 @@ window.addEventListener('beforeunload', function () {
     // When that happens we reload the page to correct the problem. If this
     // happens before the navigation is complete the user is kept captive at
     // zulip.
+    blueslip.log("Setting reload_in_progress in beforeunload handler");
     reload_in_progress = true;
 });
 

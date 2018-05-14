@@ -1,28 +1,19 @@
-from __future__ import absolute_import
-from __future__ import print_function
 
+import sys
+from argparse import ArgumentParser
 from typing import Any
 
-from argparse import ArgumentParser
 from django.core.exceptions import ValidationError
-from django.core.management.base import BaseCommand
 from django.db.utils import IntegrityError
-from django.utils.translation import ugettext as _
-from zerver.models import get_realm, can_add_realm_domain, \
-    Realm, RealmDomain, get_realm_domains
-from zerver.lib.domains import validate_domain
-import sys
 
-class Command(BaseCommand):
+from zerver.lib.domains import validate_domain
+from zerver.lib.management import ZulipBaseCommand
+from zerver.models import RealmDomain, get_realm_domains
+
+class Command(ZulipBaseCommand):
     help = """Manage domains for the specified realm"""
 
-    def add_arguments(self, parser):
-        # type: (ArgumentParser) -> None
-        parser.add_argument('-r', '--realm',
-                            dest='string_id',
-                            type=str,
-                            required=True,
-                            help='The subdomain or string_id of the realm.')
+    def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument('--op',
                             dest='op',
                             type=str,
@@ -35,10 +26,11 @@ class Command(BaseCommand):
                             help='Whether subdomains are allowed or not.')
         parser.add_argument('domain', metavar='<domain>', type=str, nargs='?',
                             help="domain to add or remove")
+        self.add_realm_args(parser, True)
 
-    def handle(self, *args, **options):
-        # type: (*Any, **str) -> None
-        realm = get_realm(options["string_id"])
+    def handle(self, *args: Any, **options: str) -> None:
+        realm = self.get_realm(options)
+        assert realm is not None  # Should be ensured by parser
         if options["op"] == "show":
             print("Domains for %s:" % (realm.string_id,))
             for realm_domain in get_realm_domains(realm):
@@ -56,14 +48,11 @@ class Command(BaseCommand):
             sys.exit(1)
         if options["op"] == "add":
             try:
-                if not can_add_realm_domain(domain):
-                    print(_("The domain %(domain)s belongs to another organization.") % {'domain': domain})
-                    sys.exit(1)
                 RealmDomain.objects.create(realm=realm, domain=domain,
                                            allow_subdomains=options["allow_subdomains"])
                 sys.exit(0)
             except IntegrityError:
-                print(_("The domain %(domain)s is already a part of your organization.") % {'domain': domain})
+                print("The domain %(domain)s is already a part of your organization." % {'domain': domain})
                 sys.exit(1)
         elif options["op"] == "remove":
             try:

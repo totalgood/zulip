@@ -2,7 +2,7 @@
 
 {!admin-only.md!}
 
-{!follow-steps.md!} deactivate or reactivate any bots
+Follow the following steps to deactivate or reactivate any bots
 in your organization.
 
 !!! tip ""
@@ -11,8 +11,7 @@ in your organization.
 
 ## Deactivate a bot
 
-{!go-to-the.md!} [Bots](/#organization/bot-list-admin)
-{!admin.md!}
+{settings_tab|bot-list-admin}
 
 4. Click the **Deactivate** button to the right of the bot that you want to
 deactivate.
@@ -26,8 +25,7 @@ stricken through, confirming the success of the bot's deactivation.
 Zulip organization administrators can choose to reactivate a deactivated bot by
 following the following steps.
 
-{!go-to-the.md!} [Bots](/#organization/bot-list-admin)
-{!admin.md!}
+{settings_tab|bot-list-admin}
 
 4. In the **Bots** section, click the **Reactivate** button to the right of the
 bot that you want to reactivate.

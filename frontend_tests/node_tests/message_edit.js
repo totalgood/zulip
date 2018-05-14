@@ -3,11 +3,9 @@ set_global('page_params', {});
 
 global.stub_out_jquery();
 
-add_dependencies({
-    XDate: 'node_modules/xdate/src/xdate.js',
-});
+zrequire('XDate', 'node_modules/xdate/src/xdate');
+zrequire('message_edit');
 
-var message_edit = require('js/message_edit.js');
 var get_editability = message_edit.get_editability;
 var editability_types = message_edit.editability_types;
 
@@ -19,13 +17,12 @@ var editability_types = message_edit.editability_types;
         sent_by_me: false,
     }), editability_types.NO);
 
-    // If the server returns the message with an error (e.g. due to
-    // malformed markdown), you can edit the message regardless of the realm
-    // message editing policy, since the message hasn't actually been sent yet
+    // Failed request are currently not editable (though we want to
+    // change this back).
     assert.equal(get_editability({
         sent_by_me: true,
         failed_request: true,
-    }), editability_types.FULL);
+    }), editability_types.NO);
 
     // Locally echoed messages are not editable, since the message hasn't
     // finished being sent yet.
@@ -69,4 +66,27 @@ var editability_types = message_edit.editability_types;
     assert.equal(get_editability(message, 45), editability_types.NO_LONGER);
     // If we don't pass a second argument, treat it as 0
     assert.equal(get_editability(message), editability_types.NO_LONGER);
+
+    message = {
+        sent_by_me: false,
+        type: 'stream',
+    };
+    global.page_params = {
+        realm_allow_community_topic_editing: true,
+        realm_allow_message_editing: true,
+        realm_message_content_edit_limit_seconds: 0,
+    };
+    message.timestamp = current_timestamp - 60;
+    assert.equal(get_editability(message), editability_types.TOPIC_ONLY);
+
+    // Test `message_edit.is_topic_editable()`
+    assert.equal(message_edit.is_topic_editable(message), true);
+
+    message.sent_by_me = true;
+    global.page_params.realm_allow_community_topic_editing = false;
+    assert.equal(message_edit.is_topic_editable(message), true);
+
+    message.sent_by_me = false;
+    global.page_params.realm_allow_community_topic_editing = false;
+    assert.equal(message_edit.is_topic_editable(message), false);
 }());

@@ -1,10 +1,7 @@
-add_dependencies({
-    Handlebars: 'handlebars',
-    templates: 'js/templates',
-    i18n: 'i18next',
-});
+zrequire('Handlebars', 'handlebars');
+zrequire('templates');
+zrequire('i18n', 'i18next');
 
-var i18n = global.i18n;
 i18n.init({
     nsSeparator: false,
     keySeparator: false,
@@ -17,7 +14,7 @@ i18n.init({
         fr: {
             translation: {
                 "Quote and reply": "French translation",
-                "You'll receive notifications when a message arrives and Zulip isn't in focus or the message is offscreen.": "Some French text with Zulip",
+                "Notifications are triggered when a message arrives and Zulip isn't in focus or the message is offscreen.": "Some French text with Zulip",
             },
         },
     },
@@ -32,6 +29,7 @@ i18n.init({
             subject: "testing",
             sender_full_name: "King Lear",
         },
+        should_display_quote_and_reply: true,
         can_edit_message: true,
         can_mute_topic: true,
         narrowed: true,
@@ -50,6 +48,7 @@ i18n.init({
             left_side_userlist: false,
             twenty_four_hour_time: false,
             enable_stream_desktop_notifications: false,
+            enable_stream_push_notifications: false,
             enable_stream_sounds: false,
             enable_desktop_notifications: false,
             enable_sounds: false,
@@ -57,8 +56,6 @@ i18n.init({
             enable_offline_push_notifications: false,
             enable_online_push_notifications: false,
             enable_digest_emails: false,
-            autoscroll_forever: false,
-            default_desktop_notifications: false,
         },
     };
 

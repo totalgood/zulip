@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 import os
 import subprocess
@@ -7,8 +6,7 @@ import time
 
 from contextlib import contextmanager
 
-if False:
-    from typing import (Any, Iterator)
+from typing import (Any, Iterator, Optional)
 
 # Verify the Zulip venv is available.
 from tools.lib import sanity_check
@@ -32,7 +30,7 @@ def set_up_django(external_host):
     os.environ['PYTHONUNBUFFERED'] = 'y'
 
 def assert_server_running(server, log_file):
-    # type: (subprocess.Popen, str) -> None
+    # type: (subprocess.Popen, Optional[str]) -> None
     """Get the exit code of the server, or None if it is still running."""
     if server.poll() is not None:
         message = 'Server died unexpectedly!'
@@ -41,7 +39,7 @@ def assert_server_running(server, log_file):
         raise RuntimeError(message)
 
 def server_is_up(server, log_file):
-    # type: (subprocess.Popen, str) -> bool
+    # type: (subprocess.Popen, Optional[str]) -> bool
     assert_server_running(server, log_file)
     try:
         # We could get a 501 error if the reverse proxy is up but the Django app isn't.
@@ -50,17 +48,16 @@ def server_is_up(server, log_file):
         return False
 
 @contextmanager
-def test_server_running(force=False, external_host='testserver',
-                        log_file=None, dots=False, use_db=True):
-    # type: (bool, str, str, bool, bool) -> Iterator[None]
+def test_server_running(force: bool=False, external_host: str='testserver',
+                        log_file: Optional[str]=None, dots: bool=False, use_db: bool=True
+                        ) -> Iterator[None]:
+    log = sys.stdout
     if log_file:
         if os.path.exists(log_file) and os.path.getsize(log_file) < 100000:
             log = open(log_file, 'a')
             log.write('\n\n')
         else:
             log = open(log_file, 'w')
-    else:
-        log = sys.stdout  # type: ignore # BinaryIO vs. IO[str]
 
     set_up_django(external_host)
 
@@ -79,13 +76,15 @@ def test_server_running(force=False, external_host='testserver',
 
     try:
         # Wait for the server to start up.
-        sys.stdout.write('Waiting for test server')
+        sys.stdout.write('\nWaiting for test server (may take a while)')
+        if not dots:
+            sys.stdout.write('\n\n')
         while not server_is_up(server, log_file):
             if dots:
                 sys.stdout.write('.')
                 sys.stdout.flush()
             time.sleep(0.1)
-        sys.stdout.write('\n')
+        sys.stdout.write('\n\n--- SERVER IS UP! ---\n\n')
 
         # DO OUR ACTUAL TESTING HERE!!!
         yield
